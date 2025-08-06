@@ -1,0 +1,19 @@
+{
+  "name": "bhss-backend",
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "nedb": "^1.8.0",
+    "express-session": "^1.17.3",
+    "bcryptjs": "^2.4.3",
+    "crypto": "^1.0.1",
+    "helmet": "^7.0.0",
+    "express-rate-limit": "^6.7.0",
+    "node-fetch": "^2.6.7",
+    "nodemailer": "^6.9.11"
+  }
+}

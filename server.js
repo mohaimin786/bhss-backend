@@ -18,26 +18,26 @@ const usersDb = new Datastore({ filename: 'users.db', autoload: true });
 const secretKey =
   process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
 
-app.use(
-  session({
-    secret: secretKey,
-    resave: false,
-    saveUninitialized: false,
-    cookie: {
-      secure: process.env.NODE_ENV === 'production',
-      httpOnly: true,
-    },
-  })
-);
+app.use(session({
+  secret: 'your_secret_key',
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: true, // <- required for HTTPS
+    sameSite: 'none' // <- required for cross-origin
+  }
+}));
+
 
 app.set('trust proxy', true);
 
-app.use((req, res, next) => {
-  res.header("Access-Control-Allow-Origin", "*"); // ← Allow all origins for testing
-  res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.header("Access-Control-Allow-Headers", "Content-Type");
-  next();
-});
+
+const cors = require('cors');
+
+app.use(cors({
+  origin: 'https://stackblitz-starters-uogm5vlf.vercel.app', // replace with your frontend URL
+  credentials: true
+}));
 
 
 

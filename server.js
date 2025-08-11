@@ -446,12 +446,13 @@ app.post('/api/submit', submissionLimiter, async (req, res) => {
 
     await submission.save();
     res.redirect('/thank-you.html');
-    res.json({ success: true, id: submission._id });
+
   } catch (err) {
     console.error('Submission error:', err);
     res.status(500).json({ success: false, error: 'Database error' });
   }
 });
+
 
 // Get all submissions (protected)
 app.get('/api/submissions', authenticateToken, async (req, res) => {

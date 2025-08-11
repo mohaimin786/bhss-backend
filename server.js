@@ -86,7 +86,7 @@ app.use(express.static('public'));
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 10,
-  message: 'Too many login attempts, please try again later',
+  res.redirect('https://stackblitz-starters-uogm5vlf.vercel.app/index.html?error=rateLimitReached');
 });
 
 const submissionLimiter = rateLimit({

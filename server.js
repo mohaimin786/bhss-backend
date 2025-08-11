@@ -36,7 +36,7 @@ const cors = require('cors');
 
 app.use(cors({
   origin: 'https://stackblitz-starters-uogm5vlf.vercel.app', // replace with your frontend URL
-  credentials: true
+  credentials: true;
 }));
 
 

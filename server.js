@@ -83,11 +83,17 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.static('public'));
 
 // Rate limiters
+const rateLimit = require('express-rate-limit');
+
 const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 10,
-  res.redirect('https://stackblitz-starters-uogm5vlf.vercel.app/index.html?error=rateLimitReached');
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10, // limit each IP to 10 requests per windowMs
+  handler: (req, res, next) => {
+    // Redirect to index.html with error query param
+    res.redirect('https://stackblitz-starters-uogm5vlf.vercel.app/index.html?error=rateLimitReached');
+  }
 });
+
 
 const submissionLimiter = rateLimit({
   windowMs: 24 * 60 * 60 * 1000,

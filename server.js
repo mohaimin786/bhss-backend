@@ -1,6 +1,5 @@
 // server.js
 const express = require('express');
-const Datastore = require('nedb');
 const path = require('path');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
@@ -12,38 +11,78 @@ const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const mongoose = require('mongoose');
 
-
 const app = express();
-const db = new Datastore({ filename: 'submissions.db', autoload: true });
-const usersDb = new Datastore({ filename: 'users.db', autoload: true });
-mongoose.connect(process.env.MONGO_URI)
-  .then(() => console.log("✅ MongoDB connected"))
+
+mongoose.connect(process.env.MONGO_URI, {
+  useNewUrlParser: true,
+  useUnifiedTopology: true,
+}).then(() => console.log("✅ MongoDB connected"))
   .catch(err => console.error("❌ MongoDB connection error:", err));
 
+// Schemas & Models
+const submissionSchema = new mongoose.Schema({
+  _id: { type: String, required: true }, // string _id for NeDB compatibility
+  fullName: String,
+  email: String,
+  countryCode: String,
+  phone: String,
+  dob: String,
+  grade: String,
+  isBhStudent: Boolean,
+  bhBranch: String,
+  section: String,
+  city: String,
+  school: String,
+  country: String,
+  subjects: [String],
+  category: String,
+  motivation: String,
+  whyChosenSubjects: String,
+  heardAbout: String,
+  social: String,
+  prevCompetitions: String,
+  skills: String,
+  ideas: String,
+  status: { type: String, default: 'pending' },
+  notes: { type: String, default: '' },
+  timestamp: { type: Date, default: Date.now }
+}, { versionKey: false });
 
-// Use an env var for JWT secret if provided, otherwise generate a random secret.
-// NOTE: if you rely on the generated secret, tokens will be invalid after a server restart.
-// Recommended: set process.env.JWT_SECRET in your Railway environment variables.
+const userSchema = new mongoose.Schema({
+  _id: { type: String, required: true },
+  fullName: String,
+  email: String,
+  password: String,
+  createdAt: { type: Date, default: Date.now }
+}, { versionKey: false });
+
+const Submission = mongoose.model('Submission', submissionSchema);
+const User = mongoose.model('User', userSchema);
+
+// JWT Secret
 const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(48).toString('hex');
 
-// CORS: allow your frontend origin and allow Authorization header
+// Admin credentials hashed password setup
+const ADMIN_CREDENTIALS = {
+  username: process.env.ADMIN_USER || 'BHSS_COUNCIL',
+  password: process.env.ADMIN_PASS
+    ? bcrypt.hashSync(process.env.ADMIN_PASS, 10)
+    : bcrypt.hashSync('temporary1234', 10),
+};
 
+// Middlewares
 app.use(cors({
-  origin: 'https://stackblitz-starters-uogm5vlf.vercel.app', // your frontend URL
+  origin: 'https://stackblitz-starters-uogm5vlf.vercel.app',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
-
-
-// Trust proxy for Railway / Vercel TLS handling
 app.set('trust proxy', 1);
-
 app.use(helmet());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static('public'));
 
-// -------------------- Rate limiters --------------------
+// Rate limiters
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 10,
@@ -53,53 +92,35 @@ const loginLimiter = rateLimit({
 const submissionLimiter = rateLimit({
   windowMs: 24 * 60 * 60 * 1000,
   max: 3,
-  message:
-    'You have reached the maximum number of submissions allowed per day (3). Please try again tomorrow.',
+  message: 'You have reached the maximum number of submissions allowed per day (3). Please try again tomorrow.',
   keyGenerator: function (req) {
-    var forwarded = req.headers['x-forwarded-for'];
+    const forwarded = req.headers['x-forwarded-for'];
     if (forwarded) {
-      var ips = forwarded.split(',');
+      const ips = forwarded.split(',');
       return ips[0].trim();
     }
-    return req.connection.remoteAddress || req.ip;
+    return req.connection?.remoteAddress || req.ip;
   },
   handler: function (req, res) {
-    console.log(
-      'Rate limit exceeded for IP:',
-      req.headers['x-forwarded-for'] || req.ip
-    );
-    res.status(429).json({
-      success: false,
-      error:
-        'You have reached the maximum number of submissions allowed per day (3). Please try again tomorrow.',
-    });
+    console.log('Rate limit exceeded for IP:', req.headers['x-forwarded-for'] || req.ip);
+    res.status(429).json({ success: false, error: 'You have reached the maximum number of submissions allowed per day (3). Please try again tomorrow.' });
   },
-  // Skip rate limiting for authenticated admin (via valid JWT)
   skip: function (req, res) {
-    // If a valid admin token is present, skip
     try {
       const authHeader = req.headers['authorization'];
       if (!authHeader) return false;
       const token = authHeader.split(' ')[1];
       if (!token) return false;
       const decoded = jwt.verify(token, JWT_SECRET);
-      // Optionally you can check decoded.role or username to ensure it's admin
-      if (decoded && decoded.username && decoded.username === (process.env.ADMIN_USER || 'BHSS_COUNCIL')) {
-        return true;
-      }
+      if (decoded && decoded.username === (process.env.ADMIN_USER || 'BHSS_COUNCIL')) return true;
       return false;
-    } catch (err) {
+    } catch {
       return false;
     }
   },
   onLimitReached: function (req) {
-    console.log(
-      'Rate limit reached for',
-      req.headers['x-forwarded-for'] || req.ip,
-      'at',
-      new Date()
-    );
-  },
+    console.log('Rate limit reached for', req.headers['x-forwarded-for'] || req.ip, 'at', new Date());
+  }
 });
 
 const ipinfoLimiter = rateLimit({
@@ -108,27 +129,20 @@ const ipinfoLimiter = rateLimit({
   message: 'Too many IP info requests, please try again later',
 });
 
-// -------------------- Helpers & Auth Middleware --------------------
+// Security headers middleware
+app.use(function (req, res, next) {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  next();
+});
 
-// Admin credentials (hashed password)
-const ADMIN_CREDENTIALS = {
-  username: process.env.ADMIN_USER || 'BHSS_COUNCIL',
-  password: process.env.ADMIN_PASS
-    ? bcrypt.hashSync(process.env.ADMIN_PASS, 10)
-    : bcrypt.hashSync('temporary1234', 10),
-};
-
-// Create JWT for admin
+// Helper functions
 function createAdminToken(username) {
-  const payload = {
-    username: username,
-    iss: 'bhss-backend',
-  };
-  // 1 day expiry
+  const payload = { username, iss: 'bhss-backend' };
   return jwt.sign(payload, JWT_SECRET, { expiresIn: '1d' });
 }
 
-// Middleware to authenticate via Authorization header "Bearer <token>"
 function authenticateToken(req, res, next) {
   try {
     const authHeader = req.headers['authorization'];
@@ -138,57 +152,45 @@ function authenticateToken(req, res, next) {
     jwt.verify(token, JWT_SECRET, (err, user) => {
       if (err) return res.status(403).json({ success: false, error: 'Invalid or expired token' });
       req.user = user;
-      return next();
+      next();
     });
-  } catch (err) {
+  } catch {
     return res.status(500).json({ success: false, error: 'Server error during authentication' });
   }
 }
 
-// Small utility: check token but don't return error (used for /api/admin/status)
 function checkToken(req) {
   try {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
     if (!token) return null;
-    const decoded = jwt.verify(token, JWT_SECRET);
-    return decoded;
-  } catch (err) {
+    return jwt.verify(token, JWT_SECRET);
+  } catch {
     return null;
   }
 }
 
-// -------------------- Routes --------------------
+// Routes
 
-// IP info route (uses external IP APIs)
+// IP info route
 app.get('/api/ipinfo', ipinfoLimiter, async (req, res) => {
   try {
     const forwardedHeader = req.headers['x-forwarded-for'];
-    const clientIp = forwardedHeader
-      ? forwardedHeader.split(',')[0].trim()
-      : req.ip;
-
+    const clientIp = forwardedHeader ? forwardedHeader.split(',')[0].trim() : req.ip;
     const apiKey = process.env.IPAPI_KEY || '';
     const ipapiUrl = apiKey
       ? `https://ipapi.co/${clientIp}/json/?key=${apiKey}`
       : 'https://ipapi.co/json/';
     const fallbackUrl = 'https://ipwhois.app/json/';
 
-    console.log('Fetching IP data from:', ipapiUrl);
-
     let response = await fetch(ipapiUrl);
-
     if (!response.ok) {
-      console.warn('ipapi failed with status:', response.status);
       response = await fetch(fallbackUrl);
     }
-
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('All IP APIs failed:', errorText);
-      throw new Error('Both IP API services failed');
+      throw new Error('Both IP API services failed: ' + errorText);
     }
-
     const data = await response.json();
 
     res.json({
@@ -198,38 +200,21 @@ app.get('/api/ipinfo', ipinfoLimiter, async (req, res) => {
     });
   } catch (error) {
     console.error('IP detection error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Could not detect location',
-      fallback: true,
-    });
+    res.status(500).json({ success: false, error: 'Could not detect location', fallback: true });
   }
 });
 
-// Security headers
-app.use(function (req, res, next) {
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('X-Frame-Options', 'DENY');
-  res.setHeader('X-XSS-Protection', '1; mode=block');
-  next();
-});
-
-// -------------------- Admin auth endpoints --------------------
-
-app.post('/api/admin/login', loginLimiter, express.json(), function (req, res) {
+// Admin login
+app.post('/api/admin/login', loginLimiter, (req, res) => {
   try {
-    var username = req.body.username;
-    var password = req.body.password;
-
+    const { username, password } = req.body;
     if (
       username === ADMIN_CREDENTIALS.username &&
       bcrypt.compareSync(password, ADMIN_CREDENTIALS.password)
     ) {
-      // create and return token to the client
       const token = createAdminToken(username);
-      return res.json({ success: true, token: token });
+      return res.json({ success: true, token });
     }
-
     return res.status(401).json({ success: false, error: 'Invalid credentials' });
   } catch (err) {
     console.error('Login error:', err);
@@ -237,22 +222,20 @@ app.post('/api/admin/login', loginLimiter, express.json(), function (req, res) {
   }
 });
 
-// Logout: with JWT stateless auth, logout is client-side (remove token).
-// Provide endpoint for convenience (no server-side invalidation here).
-app.post('/api/admin/logout', function (req, res) {
-  // Nothing to do server-side unless you implement token revocation.
+// Admin logout (stateless JWT)
+app.post('/api/admin/logout', (req, res) => {
   res.json({ success: true, message: 'Client should delete the stored token' });
 });
 
-// Status: returns whether a provided token is valid
-app.get('/api/admin/status', function (req, res) {
+// Admin status check
+app.get('/api/admin/status', (req, res) => {
   const decoded = checkToken(req);
   if (decoded) return res.json({ authenticated: true, user: decoded });
   return res.json({ authenticated: false });
 });
 
-// -------------------- Rate-test --------------------
-app.get('/api/rate-test', submissionLimiter, function (req, res) {
+// Rate-test endpoint
+app.get('/api/rate-test', submissionLimiter, (req, res) => {
   res.json({
     success: true,
     message: 'Rate test passed',
@@ -261,377 +244,295 @@ app.get('/api/rate-test', submissionLimiter, function (req, res) {
   });
 });
 
-// -------------------- Submissions CRUD (protected) --------------------
+// Export submissions CSV (protected)
+app.get('/api/submissions/export-filtered', authenticateToken, async (req, res) => {
+  try {
+    const docs = await Submission.find({}).sort({ timestamp: -1 }).exec();
 
-// Export filtered CSV (protected)
-app.get('/api/submissions/export-filtered', authenticateToken, function (req, res) {
-  db.find({})
-    .sort({ timestamp: -1 })
-    .exec(function (err, docs) {
-      if (err) {
-        console.error('Export error:', err);
-        return res.status(500).json({ success: false, error: 'Export failed' });
-      }
+    let csv = 'Full Name,Email,Country Code,Phone Number,Date of Birth,Grade,Is BH Student,Country,School Name,Subjects,Motivation\n';
 
-      let csv = 'Full Name,Email,Country Code,Phone Number,Date of Birth,Grade,Is BH Student,Country,School Name,Subjects,Motivation\n';
+    docs.forEach((sub) => {
+      const escapeCsv = (str) => {
+        if (!str) return '';
+        return `"${String(str).replace(/"/g, '""')}"`;
+      };
 
-      docs.forEach(function (sub) {
-        const escapeCsv = (str) => {
-          if (!str) return '';
-          return `"${String(str).replace(/"/g, '""')}"`;
-        };
+      const subjects = sub.subjects ? sub.subjects.join('; ') : '';
 
-        const subjects = sub.subjects ? sub.subjects.join('; ') : '';
-
-        csv += [
-          escapeCsv(sub.fullName),
-          escapeCsv(sub.email),
-          escapeCsv(sub.countryCode),
-          escapeCsv(sub.phone),
-          escapeCsv(sub.dob),
-          escapeCsv(sub.grade),
-          escapeCsv(sub.isBhStudent ? 'Yes' : 'No'),
-          escapeCsv(sub.country),
-          escapeCsv(sub.school),
-          escapeCsv(subjects),
-          escapeCsv(sub.motivation)
-        ].join(',') + '\n';
-      });
-
-      res.setHeader('Content-Type', 'text/csv');
-      res.setHeader(
-        'Content-Disposition',
-        'attachment; filename=filtered-submissions-' +
-          new Date().toISOString().slice(0, 10) +
-          '.csv'
-      );
-      res.send(csv);
+      csv += [
+        escapeCsv(sub.fullName),
+        escapeCsv(sub.email),
+        escapeCsv(sub.countryCode),
+        escapeCsv(sub.phone),
+        escapeCsv(sub.dob),
+        escapeCsv(sub.grade),
+        escapeCsv(sub.isBhStudent ? 'Yes' : 'No'),
+        escapeCsv(sub.country),
+        escapeCsv(sub.school),
+        escapeCsv(subjects),
+        escapeCsv(sub.motivation)
+      ].join(',') + '\n';
     });
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader(
+      'Content-Disposition',
+      'attachment; filename=filtered-submissions-' + new Date().toISOString().slice(0, 10) + '.csv'
+    );
+    res.send(csv);
+  } catch (err) {
+    console.error('Export error:', err);
+    res.status(500).json({ success: false, error: 'Export failed' });
+  }
 });
 
-app.delete('/api/submissions/bulk-delete', authenticateToken, express.json(), (req, res) => {
+// Bulk delete submissions (protected)
+app.delete('/api/submissions/bulk-delete', authenticateToken, async (req, res) => {
   try {
     const { ids } = req.body;
-
-    if (!ids || !Array.isArray(ids)) {
-      return res.status(400).json({
-        success: false,
-        error: 'IDs must be provided as an array'
-      });
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ success: false, error: 'IDs must be a non-empty array' });
     }
-
-    const validIds = ids.map(id => String(id)).filter(id => id.trim().length > 0);
-
+    const validIds = ids.map(id => String(id).trim()).filter(id => id.length > 0);
     if (validIds.length === 0) {
-      return res.status(400).json({
-        success: false,
-        error: 'No valid IDs provided'
-      });
+      return res.status(400).json({ success: false, error: 'No valid IDs provided' });
     }
-
-    db.remove({ _id: { $in: validIds } }, { multi: true }, (err, numRemoved) => {
-      if (err) {
-        console.error('Database error:', err);
-        return res.status(500).json({
-          success: false,
-          error: 'Database operation failed'
-        });
-      }
-
-      res.json({
-        success: true,
-        deleted: numRemoved,
-        message: `Deleted ${numRemoved} submissions`
-      });
-    });
+    const result = await Submission.deleteMany({ _id: { $in: validIds } });
+    res.json({ success: true, deleted: result.deletedCount, message: `Deleted ${result.deletedCount} submissions` });
   } catch (err) {
-    console.error('Server error:', err);
-    res.status(500).json({
-      success: false,
-      error: 'Internal server error'
-    });
+    console.error('Bulk delete error:', err);
+    res.status(500).json({ success: false, error: 'Internal server error' });
   }
 });
 
-app.put('/api/submissions/bulk-update', authenticateToken, express.json(), function (req, res) {
-  var ids = req.body.ids;
-  var status = req.body.status;
-
-  if (!ids || !Array.isArray(ids)) {
-    return res
-      .status(400)
-      .json({ success: false, error: 'Invalid submission IDs' });
-  }
-
-  if (!['pending', 'approved', 'rejected'].includes(status)) {
-    return res.status(400).json({ success: false, error: 'Invalid status' });
-  }
-
-  db.update(
-    { _id: { $in: ids } },
-    { $set: { status: status } },
-    { multi: true },
-    function (err, numUpdated) {
-      if (err) {
-        return res
-          .status(500)
-          .json({ success: false, error: 'Database error' });
-      }
-      res.json({ success: true, updated: numUpdated });
+// Bulk update submissions status (protected)
+app.put('/api/submissions/bulk-update', authenticateToken, async (req, res) => {
+  try {
+    const { ids, status } = req.body;
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ success: false, error: 'Invalid submission IDs' });
     }
-  );
+    if (!['pending', 'approved', 'rejected'].includes(status)) {
+      return res.status(400).json({ success: false, error: 'Invalid status' });
+    }
+    const result = await Submission.updateMany(
+      { _id: { $in: ids } },
+      { $set: { status } }
+    );
+    res.json({ success: true, updated: result.modifiedCount });
+  } catch (err) {
+    console.error('Bulk update error:', err);
+    res.status(500).json({ success: false, error: 'Database error' });
+  }
 });
 
-// Update single submission (status + notes)
-app.put('/api/submissions/:id', authenticateToken, express.json(), function (req, res) {
-  const id = req.params.id;
-  const { status, notes } = req.body;
-
-  if (!['pending', 'approved', 'rejected'].includes(status)) {
-    return res.status(400).json({ success: false, error: 'Invalid status' });
-  }
-
-  db.update(
-    { _id: id },
-    { $set: { status, notes: notes || '' } },
-    {},
-    (err, numReplaced) => {
-      if (err) return res.status(500).json({ success: false, error: 'Database error' });
-      res.json({ success: true, updated: numReplaced });
+// Update single submission (protected)
+app.put('/api/submissions/:id', authenticateToken, async (req, res) => {
+  try {
+    const id = req.params.id;
+    const { status, notes } = req.body;
+    if (!['pending', 'approved', 'rejected'].includes(status)) {
+      return res.status(400).json({ success: false, error: 'Invalid status' });
     }
-  );
+    const result = await Submission.updateOne(
+      { _id: id },
+      { $set: { status, notes: notes || '' } }
+    );
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ success: false, error: 'Submission not found' });
+    }
+    res.json({ success: true, updated: result.modifiedCount });
+  } catch (err) {
+    console.error('Update submission error:', err);
+    res.status(500).json({ success: false, error: 'Database error' });
+  }
 });
 
-// Delete single submission
-app.delete('/api/submissions/:id', authenticateToken, (req, res) => {
-  const id = req.params.id;
-
-  db.remove({ _id: id }, {}, (err, numRemoved) => {
-    if (err) {
-      console.error('Delete error:', err);
-      return res.status(500).json({
-        success: false,
-        error: 'Database error'
-      });
+// Delete single submission (protected)
+app.delete('/api/submissions/:id', authenticateToken, async (req, res) => {
+  try {
+    const id = req.params.id;
+    const result = await Submission.deleteOne({ _id: id });
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ success: false, error: 'Submission not found' });
     }
-
-    if (numRemoved === 0) {
-      return res.status(404).json({
-        success: false,
-        error: 'Submission not found'
-      });
-    }
-
-    res.json({
-      success: true,
-      deleted: numRemoved
-    });
-  });
+    res.json({ success: true, deleted: result.deletedCount });
+  } catch (err) {
+    console.error('Delete submission error:', err);
+    res.status(500).json({ success: false, error: 'Database error' });
+  }
 });
 
 // Create submission (public)
-app.post('/api/submit', submissionLimiter, express.json(), function (req, res) {
-  if (
-    !req.body.fullName ||
-    !req.body.email ||
-    !req.body.phone ||
-    !req.body.dob ||
-    !req.body.grade ||
-    !req.body.isBhStudent
-  ) {
-    return res
-      .status(400)
-      .json({ success: false, error: 'All required fields must be filled' });
-  }
+app.post('/api/submit', submissionLimiter, async (req, res) => {
+  try {
+    const {
+      fullName,
+      email,
+      countryCode,
+      phone,
+      dob,
+      grade,
+      isBhStudent,
+      bhBranch,
+      section,
+      city,
+      school,
+      country,
+      subjects,
+      category,
+      motivation,
+      whyChosenSubjects,
+      heardAbout,
+      social,
+      prevCompetitions,
+      skills,
+      ideas
+    } = req.body;
 
-  if (!req.body.subjects || req.body.subjects.length === 0) {
-    return res
-      .status(400)
-      .json({ success: false, error: 'Please select at least one subject' });
-  }
+    if (!fullName || !email || !phone || !dob || !grade || !isBhStudent) {
+      return res.status(400).json({ success: false, error: 'All required fields must be filled' });
+    }
 
-  if (!req.body.motivation || req.body.motivation.length < 50) {
-    return res
-      .status(400)
-      .json({
-        success: false,
-        error: 'Motivation must be at least 50 characters long',
-      });
-  }
+    if (!Array.isArray(subjects) || subjects.length === 0) {
+      return res.status(400).json({ success: false, error: 'Please select at least one subject' });
+    }
 
-  if (req.body.isBhStudent === 'yes' && !req.body.section) {
-    return res
-      .status(400)
-      .json({ success: false, error: 'Section is required for BH students' });
-  }
+    if (!motivation || motivation.length < 50) {
+      return res.status(400).json({ success: false, error: 'Motivation must be at least 50 characters long' });
+    }
 
-  if (
-    req.body.isBhStudent === 'no' &&
-    (!req.body.country || !req.body.school)
-  ) {
-    return res
-      .status(400)
-      .json({
-        success: false,
-        error: 'Country and School are required for non-BH students',
-      });
-  }
+    if (isBhStudent === 'yes' && !section) {
+      return res.status(400).json({ success: false, error: 'Section is required for BH students' });
+    }
 
-  var submission = {
-    fullName: req.body.fullName,
-    email: req.body.email,
-    countryCode: req.body.countryCode,
-    phone: req.body.phone,
-    dob: req.body.dob,
-    grade: req.body.grade,
-    isBhStudent: req.body.isBhStudent === 'yes',
-    bhBranch: req.body.bhBranch || null,
-    section: req.body.section || null,
-    city: req.body.city || null,
-    school: req.body.school || null,
-    country: req.body.country || null,
-    subjects: req.body.subjects,
-    category: req.body.category || null,
-    motivation: req.body.motivation,
-    whyChosenSubjects: req.body.whyChosenSubjects || null,
-    heardAbout: req.body.heardAbout || null,
-    social: req.body.social || null,
-    prevCompetitions: req.body.prevCompetitions || null,
-    skills: req.body.skills || null,
-    ideas: req.body.ideas || null,
-    status: 'pending',
-    timestamp: new Date(),
-  };
-  console.log("Incoming submission data:", req.body);
-  db.insert(submission, function (err, doc) {
-    if (err)
-      return res.status(500).json({ success: false, error: 'Database error' });
-    console.log(
-      'New submission from IP:',
-      submission.ipAddress,
-      'at',
-      new Date()
-    );
-    res.json({ success: true, id: doc._id });
-  });
-});
+    if (isBhStudent === 'no' && (!country || !school)) {
+      return res.status(400).json({ success: false, error: 'Country and School are required for non-BH students' });
+    }
 
-// Get submissions (protected)
-app.get('/api/submissions', authenticateToken, function (req, res) {
-  db.find({})
-    .sort({ timestamp: -1 })
-    .exec(function (err, docs) {
-      if (err) return res.status(500).json({ error: 'Database error' });
-      res.json({ success: true, data: docs });
+    const submission = new Submission({
+      _id: new mongoose.Types.ObjectId().toString(),
+      fullName,
+      email,
+      countryCode,
+      phone,
+      dob,
+      grade,
+      isBhStudent: isBhStudent === 'yes',
+      bhBranch: bhBranch || null,
+      section: section || null,
+      city: city || null,
+      school: school || null,
+      country: country || null,
+      subjects,
+      category: category || null,
+      motivation,
+      whyChosenSubjects: whyChosenSubjects || null,
+      heardAbout: heardAbout || null,
+      social: social || null,
+      prevCompetitions: prevCompetitions || null,
+      skills: skills || null,
+      ideas: ideas || null,
+      status: 'pending',
+      timestamp: new Date(),
     });
+
+    await submission.save();
+
+    res.json({ success: true, id: submission._id });
+  } catch (err) {
+    console.error('Submission error:', err);
+    res.status(500).json({ success: false, error: 'Database error' });
+  }
 });
 
-// Approve submission: generates password, stores user, sends email
+// Get all submissions (protected)
+app.get('/api/submissions', authenticateToken, async (req, res) => {
+  try {
+    const docs = await Submission.find({}).sort({ timestamp: -1 }).exec();
+    res.json({ success: true, data: docs });
+  } catch (err) {
+    console.error('Fetch submissions error:', err);
+    res.status(500).json({ success: false, error: 'Database error' });
+  }
+});
+
+// Approve submission (generate password, create user, send email)
 app.post('/api/submissions/:id/approve', authenticateToken, async (req, res) => {
   try {
-    const submission = await new Promise((resolve, reject) => {
-      db.findOne({ _id: req.params.id }, (err, doc) => {
-        if (err) reject(err);
-        else resolve(doc);
-      });
-    });
-
-    if (!submission) {
-      return res.status(404).json({ success: false, error: 'Submission not found' });
-    }
+    const submission = await Submission.findById(req.params.id);
+    if (!submission) return res.status(404).json({ success: false, error: 'Submission not found' });
 
     const plainPassword = crypto.randomBytes(8).toString('hex');
     const hashedPassword = await bcrypt.hash(plainPassword, 10);
 
-    usersDb.insert({
+    const user = new User({
+      _id: new mongoose.Types.ObjectId().toString(),
       fullName: submission.fullName,
       email: submission.email,
       password: hashedPassword,
       createdAt: new Date()
     });
 
-    db.update({ _id: req.params.id }, { $set: { status: 'approved' } }, {}, async () => {
-      const transporter = nodemailer.createTransport({
-        service: 'gmail',
-        auth: {
-          user: process.env.SMTP_USER,
-          pass: process.env.SMTP_PASS
-        }
-      });
+    await user.save();
+    submission.status = 'approved';
+    await submission.save();
 
-      await transporter.sendMail({
-        from: `"BHSS" <${process.env.SMTP_USER}>`,
-        to: submission.email,
-        subject: "BHSS Registration Approved",
-        text: `Hello ${submission.fullName},\n\nCongratulations! Your registration has been approved.\n\nYour login password is: ${plainPassword}\n\nPlease keep it safe.\n\nBest regards,\nBHSS Council`
-      });
-
-      res.json({ success: true, message: 'User approved and email sent' });
+    const transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS
+      }
     });
+
+    await transporter.sendMail({
+      from: `"BHSS" <${process.env.SMTP_USER}>`,
+      to: submission.email,
+      subject: "BHSS Registration Approved",
+      text: `Hello ${submission.fullName},\n\nCongratulations! Your registration has been approved.\n\nYour login password is: ${plainPassword}\n\nPlease keep it safe.\n\nBest regards,\nBHSS Council`
+    });
+
+    res.json({ success: true, message: 'User approved and email sent' });
   } catch (err) {
-    console.error(err);
+    console.error('Approve submission error:', err);
     res.status(500).json({ success: false, error: 'Internal server error' });
   }
 });
 
-// Reject submission: updates status, sends rejection email
+// Reject submission (update status, send email)
 app.post('/api/submissions/:id/reject', authenticateToken, async (req, res) => {
   try {
-    const submission = await new Promise((resolve, reject) => {
-      db.findOne({ _id: req.params.id }, (err, doc) => {
-        if (err) reject(err);
-        else resolve(doc);
-      });
+    const submission = await Submission.findById(req.params.id);
+    if (!submission) return res.status(404).json({ success: false, error: 'Submission not found' });
+
+    submission.status = 'rejected';
+    await submission.save();
+
+    const transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS
+      }
     });
 
-    if (!submission) {
-      return res.status(404).json({ success: false, error: 'Submission not found' });
-    }
-
-    db.update({ _id: req.params.id }, { $set: { status: 'rejected' } }, {}, async () => {
-      const transporter = nodemailer.createTransport({
-        service: 'gmail',
-        auth: {
-          user: process.env.SMTP_USER,
-          pass: process.env.SMTP_PASS
-        }
-      });
-
-      await transporter.sendMail({
-        from: `"BHSS" <${process.env.SMTP_USER}>`,
-        to: submission.email,
-        subject: "BHSS Registration Decision",
-        text: `Hello ${submission.fullName},\n\nWe appreciate your interest in joining BHSS, but unfortunately your registration has not been approved at this time.\n\nWe encourage you to apply again in the future.\n\nBest regards,\nBHSS Council`
-      });
-
-      res.json({ success: true, message: 'User rejected and email sent' });
+    await transporter.sendMail({
+      from: `"BHSS" <${process.env.SMTP_USER}>`,
+      to: submission.email,
+      subject: "BHSS Registration Rejected",
+      text: `Hello ${submission.fullName},\n\nWe regret to inform you that your registration has been rejected.\n\nThank you for your interest.\n\nBest regards,\nBHSS Council`
     });
+
+    res.json({ success: true, message: 'User rejected and email sent' });
   } catch (err) {
-    console.error(err);
+    console.error('Reject submission error:', err);
     res.status(500).json({ success: false, error: 'Internal server error' });
   }
 });
 
-// -------------------- Static pages --------------------
-
-// Serve landing pages (frontend handles redirect/login state)
-app.get('/', function (req, res) {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
-app.get('/register', function (req, res) {
-  res.sendFile(path.join(__dirname, 'public', 'register.html'));
-});
-// Serve admin pages - frontend should check the token and redirect if invalid
-app.get('/admin', function (req, res) {
-  res.sendFile(path.join(__dirname, 'public', 'admin.html'));
-});
-app.get('/admin-login', function (req, res) {
-  res.sendFile(path.join(__dirname, 'public', 'admin-login.html'));
-});
-
-// -------------------- Start server --------------------
-var PORT = process.env.PORT || 3000;
-app.listen(PORT, function () {
-  console.log('Server running on port', PORT);
-  console.log('Rate limiting configured for 3 submissions per IP per 24 hours');
+// Start server
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`);
 });

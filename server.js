@@ -1,56 +1,42 @@
+// server.js
 const express = require('express');
 const Datastore = require('nedb');
 const path = require('path');
-const session = require('express-session');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const fetch = require('node-fetch');
 const nodemailer = require('nodemailer');
-
-
+const cors = require('cors');
+const jwt = require('jsonwebtoken');
 
 const app = express();
 const db = new Datastore({ filename: 'submissions.db', autoload: true });
 const usersDb = new Datastore({ filename: 'users.db', autoload: true });
 
-const secretKey =
-  process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
+// Use an env var for JWT secret if provided, otherwise generate a random secret.
+// NOTE: if you rely on the generated secret, tokens will be invalid after a server restart.
+// Recommended: set process.env.JWT_SECRET in your Railway environment variables.
+const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(48).toString('hex');
 
-app.use(session({
-  secret: 'your_secret_key',
-  resave: false,
-  saveUninitialized: false,
-  proxy: true,
-  cookie: {
-    secure: true,
-    sameSite: 'none',
-    httpOnly: true
-  }
-}));
-
-
-app.set('trust proxy', true);
-
-
-const cors = require('cors');
-
+// CORS: allow your frontend origin and allow Authorization header
 app.use(cors({
-  origin: 'https://stackblitz-starters-uogm5vlf.vercel.app', // replace with your frontend URL
-  credentials: true
+  origin: 'https://stackblitz-starters-uogm5vlf.vercel.app',
+  credentials: true,
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS']
 }));
-app.set('trust proxy', 1);
 
+// Trust proxy for Railway / Vercel TLS handling
+app.set('trust proxy', 1);
 
 app.use(helmet());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static('public'));
 
-
-
-
+// -------------------- Rate limiters --------------------
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 10,
@@ -68,7 +54,7 @@ const submissionLimiter = rateLimit({
       var ips = forwarded.split(',');
       return ips[0].trim();
     }
-    return req.connection.remoteAddress;
+    return req.connection.remoteAddress || req.ip;
   },
   handler: function (req, res) {
     console.log(
@@ -81,8 +67,23 @@ const submissionLimiter = rateLimit({
         'You have reached the maximum number of submissions allowed per day (3). Please try again tomorrow.',
     });
   },
+  // Skip rate limiting for authenticated admin (via valid JWT)
   skip: function (req, res) {
-    return req.session.authenticated;
+    // If a valid admin token is present, skip
+    try {
+      const authHeader = req.headers['authorization'];
+      if (!authHeader) return false;
+      const token = authHeader.split(' ')[1];
+      if (!token) return false;
+      const decoded = jwt.verify(token, JWT_SECRET);
+      // Optionally you can check decoded.role or username to ensure it's admin
+      if (decoded && decoded.username && decoded.username === (process.env.ADMIN_USER || 'BHSS_COUNCIL')) {
+        return true;
+      }
+      return false;
+    } catch (err) {
+      return false;
+    }
   },
   onLimitReached: function (req) {
     console.log(
@@ -100,6 +101,59 @@ const ipinfoLimiter = rateLimit({
   message: 'Too many IP info requests, please try again later',
 });
 
+// -------------------- Helpers & Auth Middleware --------------------
+
+// Admin credentials (hashed password)
+const ADMIN_CREDENTIALS = {
+  username: process.env.ADMIN_USER || 'BHSS_COUNCIL',
+  password: process.env.ADMIN_PASS
+    ? bcrypt.hashSync(process.env.ADMIN_PASS, 10)
+    : bcrypt.hashSync('temporary1234', 10),
+};
+
+// Create JWT for admin
+function createAdminToken(username) {
+  const payload = {
+    username: username,
+    iss: 'bhss-backend',
+  };
+  // 1 day expiry
+  return jwt.sign(payload, JWT_SECRET, { expiresIn: '1d' });
+}
+
+// Middleware to authenticate via Authorization header "Bearer <token>"
+function authenticateToken(req, res, next) {
+  try {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+    if (!token) return res.status(401).json({ success: false, error: 'Authentication required' });
+
+    jwt.verify(token, JWT_SECRET, (err, user) => {
+      if (err) return res.status(403).json({ success: false, error: 'Invalid or expired token' });
+      req.user = user;
+      return next();
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: 'Server error during authentication' });
+  }
+}
+
+// Small utility: check token but don't return error (used for /api/admin/status)
+function checkToken(req) {
+  try {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+    if (!token) return null;
+    const decoded = jwt.verify(token, JWT_SECRET);
+    return decoded;
+  } catch (err) {
+    return null;
+  }
+}
+
+// -------------------- Routes --------------------
+
+// IP info route (uses external IP APIs)
 app.get('/api/ipinfo', ipinfoLimiter, async (req, res) => {
   try {
     const forwardedHeader = req.headers['x-forwarded-for'];
@@ -145,6 +199,7 @@ app.get('/api/ipinfo', ipinfoLimiter, async (req, res) => {
   }
 });
 
+// Security headers
 app.use(function (req, res, next) {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
@@ -152,49 +207,44 @@ app.use(function (req, res, next) {
   next();
 });
 
-const ADMIN_CREDENTIALS = {
-  username: process.env.ADMIN_USER || 'BHSS_COUNCIL',
-  password: process.env.ADMIN_PASS
-    ? bcrypt.hashSync(process.env.ADMIN_PASS, 10)
-    : bcrypt.hashSync('temporary1234', 10),
-};
-
-function requireAuth(req, res, next) {
-  if (req.session.authenticated) {
-    return next();
-  }
-  res.status(403).json({ error: 'Authentication required' });
-}
+// -------------------- Admin auth endpoints --------------------
 
 app.post('/api/admin/login', loginLimiter, express.json(), function (req, res) {
-  var username = req.body.username;
-  var password = req.body.password;
+  try {
+    var username = req.body.username;
+    var password = req.body.password;
 
-  if (
-    username === ADMIN_CREDENTIALS.username &&
-    bcrypt.compareSync(password, ADMIN_CREDENTIALS.password)
-  ) {
-    req.session.authenticated = true;
-    req.session.user = { username: username };
-    return res.json({ success: true });
-  }
-
-  res.status(401).json({ success: false, error: 'Invalid credentials' });
-});
-
-app.post('/api/admin/logout', function (req, res) {
-  req.session.destroy(function (err) {
-    if (err) {
-      console.error('Session destruction error:', err);
+    if (
+      username === ADMIN_CREDENTIALS.username &&
+      bcrypt.compareSync(password, ADMIN_CREDENTIALS.password)
+    ) {
+      // create and return token to the client
+      const token = createAdminToken(username);
+      return res.json({ success: true, token: token });
     }
-    res.json({ success: true });
-  });
+
+    return res.status(401).json({ success: false, error: 'Invalid credentials' });
+  } catch (err) {
+    console.error('Login error:', err);
+    return res.status(500).json({ success: false, error: 'Server error during login' });
+  }
 });
 
+// Logout: with JWT stateless auth, logout is client-side (remove token).
+// Provide endpoint for convenience (no server-side invalidation here).
+app.post('/api/admin/logout', function (req, res) {
+  // Nothing to do server-side unless you implement token revocation.
+  res.json({ success: true, message: 'Client should delete the stored token' });
+});
+
+// Status: returns whether a provided token is valid
 app.get('/api/admin/status', function (req, res) {
-  res.json({ authenticated: !!req.session.authenticated });
+  const decoded = checkToken(req);
+  if (decoded) return res.json({ authenticated: true, user: decoded });
+  return res.json({ authenticated: false });
 });
 
+// -------------------- Rate-test --------------------
 app.get('/api/rate-test', submissionLimiter, function (req, res) {
   res.json({
     success: true,
@@ -204,7 +254,10 @@ app.get('/api/rate-test', submissionLimiter, function (req, res) {
   });
 });
 
-app.get('/api/submissions/export-filtered', requireAuth, function (req, res) {
+// -------------------- Submissions CRUD (protected) --------------------
+
+// Export filtered CSV (protected)
+app.get('/api/submissions/export-filtered', authenticateToken, function (req, res) {
   db.find({})
     .sort({ timestamp: -1 })
     .exec(function (err, docs) {
@@ -213,20 +266,16 @@ app.get('/api/submissions/export-filtered', requireAuth, function (req, res) {
         return res.status(500).json({ success: false, error: 'Export failed' });
       }
 
-      // CSV header row with only the required fields
       let csv = 'Full Name,Email,Country Code,Phone Number,Date of Birth,Grade,Is BH Student,Country,School Name,Subjects,Motivation\n';
 
       docs.forEach(function (sub) {
-        // Format each field with proper escaping
         const escapeCsv = (str) => {
           if (!str) return '';
           return `"${String(str).replace(/"/g, '""')}"`;
         };
 
-        // Format subjects array
         const subjects = sub.subjects ? sub.subjects.join('; ') : '';
 
-        // Build the CSV row
         csv += [
           escapeCsv(sub.fullName),
           escapeCsv(sub.email),
@@ -253,55 +302,51 @@ app.get('/api/submissions/export-filtered', requireAuth, function (req, res) {
     });
 });
 
-app.delete('/api/submissions/bulk-delete', requireAuth, express.json(), (req, res) => {
+app.delete('/api/submissions/bulk-delete', authenticateToken, express.json(), (req, res) => {
   try {
     const { ids } = req.body;
 
-    // Validate input
     if (!ids || !Array.isArray(ids)) {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'IDs must be provided as an array' 
+      return res.status(400).json({
+        success: false,
+        error: 'IDs must be provided as an array'
       });
     }
 
-    // Convert all IDs to strings and filter empty ones
     const validIds = ids.map(id => String(id)).filter(id => id.trim().length > 0);
 
     if (validIds.length === 0) {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'No valid IDs provided' 
+      return res.status(400).json({
+        success: false,
+        error: 'No valid IDs provided'
       });
     }
 
-    // Perform deletion
     db.remove({ _id: { $in: validIds } }, { multi: true }, (err, numRemoved) => {
       if (err) {
         console.error('Database error:', err);
-        return res.status(500).json({ 
-          success: false, 
-          error: 'Database operation failed' 
+        return res.status(500).json({
+          success: false,
+          error: 'Database operation failed'
         });
       }
 
-      res.json({ 
-        success: true, 
+      res.json({
+        success: true,
         deleted: numRemoved,
         message: `Deleted ${numRemoved} submissions`
       });
     });
   } catch (err) {
     console.error('Server error:', err);
-    res.status(500).json({ 
-      success: false, 
-      error: 'Internal server error' 
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
     });
   }
 });
 
-
-app.put('/api/submissions/bulk-update', requireAuth, function (req, res) {
+app.put('/api/submissions/bulk-update', authenticateToken, express.json(), function (req, res) {
   var ids = req.body.ids;
   var status = req.body.status;
 
@@ -330,56 +375,8 @@ app.put('/api/submissions/bulk-update', requireAuth, function (req, res) {
   );
 });
 
-app.put('/api/submissions/:id', requireAuth, function (req, res) {
-  db.update(
-    { _id: req.params.id },
-    {
-      $set: {
-        status: req.body.status,
-        notes: req.body.notes || '',
-      },
-    },
-    {},
-    function (err, numReplaced) {
-      if (err)
-        return res
-          .status(500)
-          .json({ success: false, error: 'Database error' });
-      res.json({ success: true, updated: numReplaced });
-    }
-  );
-});
-
-// Single delete endpoint
-app.delete('/api/submissions/:id', requireAuth, (req, res) => {
-  const id = req.params.id;
-  
-  db.remove({ _id: id }, {}, (err, numRemoved) => {
-    if (err) {
-      console.error('Delete error:', err);
-      return res.status(500).json({ 
-        success: false, 
-        error: 'Database error' 
-      });
-    }
-    
-    if (numRemoved === 0) {
-      return res.status(404).json({ 
-        success: false, 
-        error: 'Submission not found' 
-      });
-    }
-    
-    res.json({ 
-      success: true,
-      deleted: numRemoved
-    });
-  });
-});
-
-// Single status update endpoint
-// Single status update (merged with notes update)
-app.put('/api/submissions/:id', requireAuth, express.json(), (req, res) => {
+// Update single submission (status + notes)
+app.put('/api/submissions/:id', authenticateToken, express.json(), function (req, res) {
   const id = req.params.id;
   const { status, notes } = req.body;
 
@@ -398,7 +395,34 @@ app.put('/api/submissions/:id', requireAuth, express.json(), (req, res) => {
   );
 });
 
+// Delete single submission
+app.delete('/api/submissions/:id', authenticateToken, (req, res) => {
+  const id = req.params.id;
 
+  db.remove({ _id: id }, {}, (err, numRemoved) => {
+    if (err) {
+      console.error('Delete error:', err);
+      return res.status(500).json({
+        success: false,
+        error: 'Database error'
+      });
+    }
+
+    if (numRemoved === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Submission not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      deleted: numRemoved
+    });
+  });
+});
+
+// Create submission (public)
 app.post('/api/submit', submissionLimiter, express.json(), function (req, res) {
   if (
     !req.body.fullName ||
@@ -485,7 +509,8 @@ app.post('/api/submit', submissionLimiter, express.json(), function (req, res) {
   });
 });
 
-app.get('/api/submissions', requireAuth, function (req, res) {
+// Get submissions (protected)
+app.get('/api/submissions', authenticateToken, function (req, res) {
   db.find({})
     .sort({ timestamp: -1 })
     .exec(function (err, docs) {
@@ -493,10 +518,10 @@ app.get('/api/submissions', requireAuth, function (req, res) {
       res.json({ success: true, data: docs });
     });
 });
+
 // Approve submission: generates password, stores user, sends email
-app.post('/api/submissions/:id/approve', requireAuth, async (req, res) => {
+app.post('/api/submissions/:id/approve', authenticateToken, async (req, res) => {
   try {
-    // Find submission
     const submission = await new Promise((resolve, reject) => {
       db.findOne({ _id: req.params.id }, (err, doc) => {
         if (err) reject(err);
@@ -508,11 +533,9 @@ app.post('/api/submissions/:id/approve', requireAuth, async (req, res) => {
       return res.status(404).json({ success: false, error: 'Submission not found' });
     }
 
-    // Generate random password
     const plainPassword = crypto.randomBytes(8).toString('hex');
     const hashedPassword = await bcrypt.hash(plainPassword, 10);
 
-    // Save to users database
     usersDb.insert({
       fullName: submission.fullName,
       email: submission.email,
@@ -520,9 +543,7 @@ app.post('/api/submissions/:id/approve', requireAuth, async (req, res) => {
       createdAt: new Date()
     });
 
-    // Update submission status
     db.update({ _id: req.params.id }, { $set: { status: 'approved' } }, {}, async () => {
-      // Send acceptance email
       const transporter = nodemailer.createTransport({
         service: 'gmail',
         auth: {
@@ -545,10 +566,10 @@ app.post('/api/submissions/:id/approve', requireAuth, async (req, res) => {
     res.status(500).json({ success: false, error: 'Internal server error' });
   }
 });
+
 // Reject submission: updates status, sends rejection email
-app.post('/api/submissions/:id/reject', requireAuth, async (req, res) => {
+app.post('/api/submissions/:id/reject', authenticateToken, async (req, res) => {
   try {
-    // Find submission
     const submission = await new Promise((resolve, reject) => {
       db.findOne({ _id: req.params.id }, (err, doc) => {
         if (err) reject(err);
@@ -560,9 +581,7 @@ app.post('/api/submissions/:id/reject', requireAuth, async (req, res) => {
       return res.status(404).json({ success: false, error: 'Submission not found' });
     }
 
-    // Update submission status
     db.update({ _id: req.params.id }, { $set: { status: 'rejected' } }, {}, async () => {
-      // Send rejection email
       const transporter = nodemailer.createTransport({
         service: 'gmail',
         auth: {
@@ -586,26 +605,24 @@ app.post('/api/submissions/:id/reject', requireAuth, async (req, res) => {
   }
 });
 
+// -------------------- Static pages --------------------
 
+// Serve landing pages (frontend handles redirect/login state)
 app.get('/', function (req, res) {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
-
 app.get('/register', function (req, res) {
   res.sendFile(path.join(__dirname, 'public', 'register.html'));
 });
-
+// Serve admin pages - frontend should check the token and redirect if invalid
 app.get('/admin', function (req, res) {
-  if (!req.session.authenticated) {
-    return res.redirect('/admin-login');
-  }
   res.sendFile(path.join(__dirname, 'public', 'admin.html'));
 });
-
 app.get('/admin-login', function (req, res) {
   res.sendFile(path.join(__dirname, 'public', 'admin-login.html'));
 });
 
+// -------------------- Start server --------------------
 var PORT = process.env.PORT || 3000;
 app.listen(PORT, function () {
   console.log('Server running on port', PORT);

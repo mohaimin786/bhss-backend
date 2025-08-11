@@ -10,8 +10,10 @@ const nodemailer = require('nodemailer');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const mongoose = require('mongoose');
+const sgMail = require('@sendgrid/mail');
 
 const app = express();
+sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
@@ -464,11 +466,47 @@ app.get('/api/submissions', authenticateToken, async (req, res) => {
 // Approve submission (generate password, create user, send email)
 app.post('/api/submissions/:id/approve', authenticateToken, async (req, res) => {
   try {
-    const submission = await Submission.findById(req.params.id);
-    if (!submission) return res.status(404).json({ success: false, error: 'Submission not found' });
+    console.log('Approving submission with ID:', req.params.id);
+    
+    // Use findOne instead of findById for string IDs
+    const submission = await Submission.findOne({ _id: req.params.id });
+    if (!submission) {
+      console.log('Submission not found:', req.params.id);
+      return res.status(404).json({ success: false, error: 'Submission not found' });
+    }
+
+    console.log('Found submission:', submission.fullName, submission.email);
+
+    // Check if user already exists
+    const existingUser = await User.findOne({ email: submission.email });
+    if (existingUser) {
+      console.log('User already exists, just updating submission status');
+      submission.status = 'approved';
+      await submission.save();
+      
+      // Still send email even if user exists
+      const transporter = nodemailer.createTransporter({
+        service: 'gmail',
+        auth: {
+          user: process.env.SMTP_USER,
+          pass: process.env.SMTP_PASS
+        }
+      });
+
+      await transporter.sendMail({
+        from: `"BHSS" <${process.env.SMTP_USER}>`,
+        to: submission.email,
+        subject: "BHSS Registration Approved",
+        text: `Hello ${submission.fullName},\n\nCongratulations! Your registration has been approved.\n\nYou can now log in to the BHSS portal.\n\nBest regards,\nBHSS Council`
+      });
+
+      return res.json({ success: true, message: 'User approved and email sent' });
+    }
 
     const plainPassword = crypto.randomBytes(8).toString('hex');
     const hashedPassword = await bcrypt.hash(plainPassword, 10);
+
+    console.log('Creating new user account');
 
     const user = new User({
       _id: new mongoose.Types.ObjectId().toString(),
@@ -479,10 +517,24 @@ app.post('/api/submissions/:id/approve', authenticateToken, async (req, res) => 
     });
 
     await user.save();
+    console.log('User account created successfully');
+
     submission.status = 'approved';
     await submission.save();
+    console.log('Submission status updated to approved');
 
-    const transporter = nodemailer.createTransport({
+    // Check environment variables
+    if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
+      console.error('SMTP credentials not configured');
+      return res.status(500).json({ 
+        success: false, 
+        error: 'Email configuration error - SMTP credentials missing' 
+      });
+    }
+
+    console.log('Sending email to:', submission.email);
+
+    const transporter = nodemailer.createTransporter({
       service: 'gmail',
       auth: {
         user: process.env.SMTP_USER,
@@ -490,30 +542,80 @@ app.post('/api/submissions/:id/approve', authenticateToken, async (req, res) => 
       }
     });
 
+    // Verify transporter configuration
+    await transporter.verify();
+    console.log('SMTP connection verified');
+
     await transporter.sendMail({
       from: `"BHSS" <${process.env.SMTP_USER}>`,
       to: submission.email,
       subject: "BHSS Registration Approved",
+      html: `
+        <h2>Congratulations!</h2>
+        <p>Hello ${submission.fullName},</p>
+        <p>Your registration for BHSS has been approved.</p>
+        <p><strong>Your login password is: ${plainPassword}</strong></p>
+        <p>Please keep this password safe and secure.</p>
+        <p>Best regards,<br>BHSS Council</p>
+      `,
       text: `Hello ${submission.fullName},\n\nCongratulations! Your registration has been approved.\n\nYour login password is: ${plainPassword}\n\nPlease keep it safe.\n\nBest regards,\nBHSS Council`
     });
 
+    console.log('Email sent successfully');
     res.json({ success: true, message: 'User approved and email sent' });
   } catch (err) {
     console.error('Approve submission error:', err);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    
+    // More detailed error response
+    if (err.code === 'EAUTH') {
+      res.status(500).json({ 
+        success: false, 
+        error: 'Email authentication failed. Check SMTP credentials.' 
+      });
+    } else if (err.code === 'ECONNECTION') {
+      res.status(500).json({ 
+        success: false, 
+        error: 'Could not connect to email server.' 
+      });
+    } else {
+      res.status(500).json({ 
+        success: false, 
+        error: 'Internal server error: ' + err.message 
+      });
+    }
   }
 });
 
 // Reject submission (update status, send email)
 app.post('/api/submissions/:id/reject', authenticateToken, async (req, res) => {
   try {
-    const submission = await Submission.findById(req.params.id);
-    if (!submission) return res.status(404).json({ success: false, error: 'Submission not found' });
+    console.log('Rejecting submission with ID:', req.params.id);
+    
+    // Use findOne instead of findById for string IDs
+    const submission = await Submission.findOne({ _id: req.params.id });
+    if (!submission) {
+      console.log('Submission not found:', req.params.id);
+      return res.status(404).json({ success: false, error: 'Submission not found' });
+    }
+
+    console.log('Found submission:', submission.fullName, submission.email);
 
     submission.status = 'rejected';
     await submission.save();
+    console.log('Submission status updated to rejected');
 
-    const transporter = nodemailer.createTransport({
+    // Check environment variables
+    if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
+      console.error('SMTP credentials not configured');
+      return res.status(500).json({ 
+        success: false, 
+        error: 'Email configuration error - SMTP credentials missing' 
+      });
+    }
+
+    console.log('Sending rejection email to:', submission.email);
+
+    const transporter = nodemailer.createTransporter({
       service: 'gmail',
       auth: {
         user: process.env.SMTP_USER,
@@ -521,20 +623,49 @@ app.post('/api/submissions/:id/reject', authenticateToken, async (req, res) => {
       }
     });
 
+    // Verify transporter configuration
+    await transporter.verify();
+    console.log('SMTP connection verified');
+
     await transporter.sendMail({
       from: `"BHSS" <${process.env.SMTP_USER}>`,
       to: submission.email,
-      subject: "BHSS Registration Rejected",
-      text: `Hello ${submission.fullName},\n\nWe regret to inform you that your registration has been rejected.\n\nThank you for your interest.\n\nBest regards,\nBHSS Council`
+      subject: "BHSS Registration Status",
+      html: `
+        <h2>BHSS Registration Update</h2>
+        <p>Hello ${submission.fullName},</p>
+        <p>Thank you for your interest in BHSS.</p>
+        <p>After careful consideration, we are unable to approve your registration at this time.</p>
+        <p>We encourage you to apply again in the future.</p>
+        <p>Best regards,<br>BHSS Council</p>
+      `,
+      text: `Hello ${submission.fullName},\n\nThank you for your interest in BHSS.\n\nAfter careful consideration, we are unable to approve your registration at this time.\n\nWe encourage you to apply again in the future.\n\nBest regards,\nBHSS Council`
     });
 
+    console.log('Rejection email sent successfully');
     res.json({ success: true, message: 'User rejected and email sent' });
   } catch (err) {
     console.error('Reject submission error:', err);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    
+    // More detailed error response
+    if (err.code === 'EAUTH') {
+      res.status(500).json({ 
+        success: false, 
+        error: 'Email authentication failed. Check SMTP credentials.' 
+      });
+    } else if (err.code === 'ECONNECTION') {
+      res.status(500).json({ 
+        success: false, 
+        error: 'Could not connect to email server.' 
+      });
+    } else {
+      res.status(500).json({ 
+        success: false, 
+        error: 'Internal server error: ' + err.message 
+      });
+    }
   }
 });
-
 // Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {

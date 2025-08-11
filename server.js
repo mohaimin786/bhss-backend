@@ -97,7 +97,7 @@ const loginLimiter = rateLimit({
 const submissionLimiter = rateLimit({
   windowMs: 24 * 60 * 60 * 1000,
   max: 3,
-  message: 'You have reached the maximum number of submissions allowed per day (3). Please try again tomorrow.',
+    res.redirect('https://stackblitz-starters-uogm5vlf.vercel.app/index.html?error=rateLimitReached');
   keyGenerator: function (req) {
     const forwarded = req.headers['x-forwarded-for'];
     if (forwarded) {
@@ -112,6 +112,8 @@ const submissionLimiter = rateLimit({
       success: false,
       limitReached: true,  // <--- added this for frontend detection
       error: 'You have reached the maximum number of submissions allowed per day (3). Please try again tomorrow.'
+      res.redirect('https://stackblitz-starters-uogm5vlf.vercel.app/index.html?error=rateLimitReached');
+
     });
   },
   skip: function (req, res) {

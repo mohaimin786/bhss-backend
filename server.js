@@ -82,12 +82,10 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static('public'));
 
-
-
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 10, // limit each IP to 10 requests per windowMs
-  handler: (req, res, next) => {
+  handler: (req, res) => {
     // Redirect to index.html with error query param
     res.redirect('https://stackblitz-starters-uogm5vlf.vercel.app/index.html?error=rateLimitReached');
   }
@@ -104,17 +102,6 @@ const submissionLimiter = rateLimit({
     }
     return req.connection?.remoteAddress || req.ip;
   },
-  handler: function (req, res) {
-    console.log('Rate limit exceeded for IP:', req.headers['x-forwarded-for'] || req.ip);
-    // Redirect on limit reached instead of sending JSON
-    res.redirect('https://stackblitz-starters-uogm5vlf.vercel.app/index.html?error=rateLimitReached');
-  },
-  // You can add skip() or onLimitReached() if needed
-});
-
-
-    
-  
   skip: function (req, res) {
     try {
       const authHeader = req.headers['authorization'];
@@ -130,6 +117,11 @@ const submissionLimiter = rateLimit({
       return false;
     }
   },
+  handler: function (req, res) {
+    console.log('Rate limit exceeded for IP:', req.headers['x-forwarded-for'] || req.ip);
+    // Redirect on limit reached instead of sending JSON
+    res.redirect('https://stackblitz-starters-uogm5vlf.vercel.app/index.html?error=rateLimitReached');
+  },
   onLimitReached: function (req) {
     console.log('Rate limit reached for', req.headers['x-forwarded-for'] || req.ip, 'at', new Date());
   }
@@ -140,7 +132,6 @@ const ipinfoLimiter = rateLimit({
   max: 100,
   message: 'Too many IP info requests, please try again later',
 });
-
 
 // Security headers middleware
 app.use(function (req, res, next) {
@@ -376,7 +367,7 @@ app.delete('/api/submissions/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// Create submission (public)
+// Create submission (public) with rate limiting except admin
 app.post('/api/submit', submissionLimiter, async (req, res) => {
   try {
     const {
@@ -458,7 +449,6 @@ app.post('/api/submit', submissionLimiter, async (req, res) => {
     res.status(500).json({ success: false, error: 'Database error' });
   }
 });
-
 
 // Get all submissions (protected)
 app.get('/api/submissions', authenticateToken, async (req, res) => {

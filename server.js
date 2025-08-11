@@ -22,9 +22,11 @@ app.use(session({
   secret: 'your_secret_key',
   resave: false,
   saveUninitialized: false,
+  proxy: true,
   cookie: {
-    secure: true, // <- required for HTTPS
-    sameSite: 'none' // <- required for cross-origin
+    secure: true,
+    sameSite: 'none',
+    httpOnly: true
   }
 }));
 
@@ -36,9 +38,9 @@ const cors = require('cors');
 
 app.use(cors({
   origin: 'https://stackblitz-starters-uogm5vlf.vercel.app', // replace with your frontend URL
-  credentials: true;
+  credentials: true
 }));
-
+app.set('trust proxy', 1);
 
 
 app.use(helmet());

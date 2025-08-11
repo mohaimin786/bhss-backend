@@ -113,8 +113,8 @@ const submissionLimiter = rateLimit({
 });
 
 
-    });
-  },
+    
+  
   skip: function (req, res) {
     try {
       const authHeader = req.headers['authorization'];

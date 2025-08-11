@@ -103,7 +103,11 @@ const submissionLimiter = rateLimit({
   },
   handler: function (req, res) {
     console.log('Rate limit exceeded for IP:', req.headers['x-forwarded-for'] || req.ip);
-    res.status(429).json({ success: false, error: 'You have reached the maximum number of submissions allowed per day (3). Please try again tomorrow.' });
+    res.status(429).json({
+      success: false,
+      limitReached: true,  // <--- added this for frontend detection
+      error: 'You have reached the maximum number of submissions allowed per day (3). Please try again tomorrow.'
+    });
   },
   skip: function (req, res) {
     try {
@@ -112,7 +116,9 @@ const submissionLimiter = rateLimit({
       const token = authHeader.split(' ')[1];
       if (!token) return false;
       const decoded = jwt.verify(token, JWT_SECRET);
-      if (decoded && decoded.username === (process.env.ADMIN_USER || 'BHSS_COUNCIL')) return true;
+      if (decoded && decoded.username === (process.env.ADMIN_USER || 'BHSS_COUNCIL')) {
+        return true; // Skip rate limit for authenticated admin JWT
+      }
       return false;
     } catch {
       return false;
@@ -128,6 +134,7 @@ const ipinfoLimiter = rateLimit({
   max: 100,
   message: 'Too many IP info requests, please try again later',
 });
+
 
 // Security headers middleware
 app.use(function (req, res, next) {

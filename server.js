@@ -445,7 +445,7 @@ app.post('/api/submit', submissionLimiter, async (req, res) => {
     });
 
     await submission.save();
-    res.redirect('/thank-you.html');
+    res.redirect('https://stackblitz-starters-uogm5vlf.vercel.app/thank-you.html');
 
   } catch (err) {
     console.error('Submission error:', err);

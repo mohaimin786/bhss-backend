@@ -93,11 +93,9 @@ const loginLimiter = rateLimit({
   }
 });
 
-
 const submissionLimiter = rateLimit({
-  windowMs: 24 * 60 * 60 * 1000,
+  windowMs: 24 * 60 * 60 * 1000, // 24 hours
   max: 3,
-    res.redirect('https://stackblitz-starters-uogm5vlf.vercel.app/index.html?error=rateLimitReached');
   keyGenerator: function (req) {
     const forwarded = req.headers['x-forwarded-for'];
     if (forwarded) {
@@ -108,11 +106,12 @@ const submissionLimiter = rateLimit({
   },
   handler: function (req, res) {
     console.log('Rate limit exceeded for IP:', req.headers['x-forwarded-for'] || req.ip);
-    res.status(429).json({
-      success: false,
-      limitReached: true,  // <--- added this for frontend detection
-      error: 'You have reached the maximum number of submissions allowed per day (3). Please try again tomorrow.'
-      res.redirect('https://stackblitz-starters-uogm5vlf.vercel.app/index.html?error=rateLimitReached');
+    // Redirect on limit reached instead of sending JSON
+    res.redirect('https://stackblitz-starters-uogm5vlf.vercel.app/index.html?error=rateLimitReached');
+  },
+  // You can add skip() or onLimitReached() if needed
+});
+
 
     });
   },

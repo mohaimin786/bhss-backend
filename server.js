@@ -21,12 +21,14 @@ const usersDb = new Datastore({ filename: 'users.db', autoload: true });
 const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(48).toString('hex');
 
 // CORS: allow your frontend origin and allow Authorization header
+import cors from 'cors';
+
 app.use(cors({
-  origin: 'https://stackblitz-starters-uogm5vlf.vercel.app',
-  credentials: true,
+  origin: 'https://stackblitz-starters-uogm5vlf.vercel.app', // your frontend URL
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
-  methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS']
 }));
+
 
 // Trust proxy for Railway / Vercel TLS handling
 app.set('trust proxy', 1);

@@ -14,6 +14,10 @@ const jwt = require('jsonwebtoken');
 const app = express();
 const db = new Datastore({ filename: 'submissions.db', autoload: true });
 const usersDb = new Datastore({ filename: 'users.db', autoload: true });
+mongoose.connect(process.env.MONGO_URI)
+  .then(() => console.log("✅ MongoDB connected"))
+  .catch(err => console.error("❌ MongoDB connection error:", err));
+
 
 // Use an env var for JWT secret if provided, otherwise generate a random secret.
 // NOTE: if you rely on the generated secret, tokens will be invalid after a server restart.

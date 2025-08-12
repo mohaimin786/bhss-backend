@@ -248,7 +248,7 @@ app.post('/api/user/login', async (req, res) => {
         return res.status(401).json({ 
           success: false, 
           message: 'Email not registered. Please register first.',
-          redirect: 'register.html'
+          redirect: 'https://stackblitz-starters-uogm5vlf.vercel.app/register.html'
         });
       }
       
@@ -256,7 +256,7 @@ app.post('/api/user/login', async (req, res) => {
         return res.status(401).json({ 
           success: false, 
           message: 'Your application is still under review. Please wait for approval.',
-          redirect: 'pending.html' // Create this page
+          redirect: 'https://stackblitz-starters-uogm5vlf.vercel.app/index.html' // Create this page
         });
       }
       
@@ -264,7 +264,7 @@ app.post('/api/user/login', async (req, res) => {
         return res.status(401).json({ 
           success: false, 
           message: 'Your application was rejected. Please contact admin if you believe this is an error.',
-          redirect: 'rejected.html' // Create this page
+          redirect: 'https://stackblitz-starters-uogm5vlf.vercel.app/index.html' // Create this page
         });
       }
       
@@ -272,7 +272,7 @@ app.post('/api/user/login', async (req, res) => {
       return res.status(401).json({ 
         success: false, 
         message: 'Account not found. Please register first.',
-        redirect: 'register.html'
+        redirect: 'https://stackblitz-starters-uogm5vlf.vercel.app/register.html'
       });
     }
 

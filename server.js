@@ -161,6 +161,37 @@ app.use(function (req, res, next) {
 });
 
 // Helper functions
+// Add this to your helper functions in server.js
+function authenticateUser(req, res, next) {
+  try {
+    const token = req.headers.authorization?.split(' ')[1];
+    
+    if (!token) {
+      return res.status(401).json({ 
+        success: false, 
+        message: 'Authentication required' 
+      });
+    }
+
+    jwt.verify(token, JWT_SECRET, (err, decoded) => {
+      if (err) {
+        return res.status(403).json({ 
+          success: false, 
+          message: 'Invalid or expired token' 
+        });
+      }
+      
+      req.user = decoded;
+      next();
+    });
+  } catch (err) {
+    console.error('Authentication error:', err);
+    return res.status(500).json({ 
+      success: false, 
+      message: 'Server error during authentication' 
+    });
+  }
+}
 function createAdminToken(username) {
   const payload = { username, iss: 'bhss-backend' };
   return jwt.sign(payload, JWT_SECRET, { expiresIn: '1d' });
@@ -194,7 +225,88 @@ function checkToken(req) {
 }
 
 // Routes
+// User login route
+app.post('/api/user/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    
+    if (!email || !password) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Email and password are required' 
+      });
+    }
 
+    // Check if user exists
+    const user = await User.findOne({ email });
+    
+    if (!user) {
+      // Check if there's a submission with this email
+      const submission = await Submission.findOne({ email });
+      
+      if (!submission) {
+        return res.status(401).json({ 
+          success: false, 
+          message: 'Email not registered. Please register first.',
+          redirect: 'register.html'
+        });
+      }
+      
+      if (submission.status === 'pending') {
+        return res.status(401).json({ 
+          success: false, 
+          message: 'Your application is still under review. Please wait for approval.',
+          redirect: 'pending.html' // Create this page
+        });
+      }
+      
+      if (submission.status === 'rejected') {
+        return res.status(401).json({ 
+          success: false, 
+          message: 'Your application was rejected. Please contact admin if you believe this is an error.',
+          redirect: 'rejected.html' // Create this page
+        });
+      }
+      
+      // Shouldn't reach here, but just in case
+      return res.status(401).json({ 
+        success: false, 
+        message: 'Account not found. Please register first.',
+        redirect: 'register.html'
+      });
+    }
+
+    // Compare passwords
+    const isMatch = await bcrypt.compare(password, user.password);
+    
+    if (!isMatch) {
+      return res.status(401).json({ 
+        success: false, 
+        message: 'Invalid password' 
+      });
+    }
+
+    // Create JWT token
+    const token = jwt.sign(
+      { userId: user._id, email: user.email }, 
+      JWT_SECRET, 
+      { expiresIn: '1d' }
+    );
+
+    res.json({ 
+      success: true, 
+      message: 'Login successful',
+      token
+    });
+
+  } catch (err) {
+    console.error('User login error:', err);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Server error during login' 
+    });
+  }
+});
 // IP info route
 app.get('/api/ipinfo', ipinfoLimiter, async (req, res) => {
   try {
@@ -325,6 +437,34 @@ app.delete('/api/submissions/bulk-delete', authenticateToken, async (req, res) =
   } catch (err) {
     console.error('Bulk delete error:', err);
     res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+// Example protected route
+app.get('/api/user/profile', authenticateUser, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId);
+    
+    if (!user) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'User not found' 
+      });
+    }
+
+    res.json({ 
+      success: true, 
+      user: {
+        email: user.email,
+        fullName: user.fullName,
+        createdAt: user.createdAt
+      }
+    });
+  } catch (err) {
+    console.error('Profile error:', err);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Server error fetching profile' 
+    });
   }
 });
 

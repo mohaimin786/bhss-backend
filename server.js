@@ -13,14 +13,24 @@ const mongoose = require('mongoose');
 const sgMail = require('@sendgrid/mail');
 
 const app = express();
-sgMail.setApiKey(process.env.SENDGRID_API_KEY);
-console.log('API Key exists:', !!process.env.SENDGRID_API_KEY);
-console.log('API Key starts with SG:', process.env.SENDGRID_API_KEY?.startsWith('SG.'));
-console.log('API Key length:', process.env.SENDGRID_API_KEY?.length);
-console.log('First 10 chars:', process.env.SENDGRID_API_KEY?.substring(0, 10));
-const sanitizedApiKey = process.env.SENDGRID_API_KEY?.trim().replace(/\s/g, '');
-sgMail.setApiKey(sanitizedApiKey);
-console.log('Final API key length:', sanitizedApiKey?.length);
+
+// Verify and set API key
+const apiKey = process.env.SENDGRID_API_KEY?.trim();
+if (!apiKey) {
+  console.error('❌ SENDGRID_API_KEY is missing');
+} else {
+  console.log('API Key exists:', !!apiKey);
+  console.log('API Key starts with SG:', apiKey.startsWith('SG.'));
+  console.log('API Key length:', apiKey.length);
+  console.log('First 10 chars:', apiKey.substring(0, 10));
+  
+  try {
+    sgMail.setApiKey(apiKey);
+    console.log('✅ SendGrid API key set successfully');
+  } catch (err) {
+    console.error('❌ Failed to set SendGrid API key:', err);
+  }
+}
 
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,

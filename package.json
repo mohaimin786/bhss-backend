@@ -16,7 +16,9 @@
     "node-fetch": "^2.6.7",
     "nodemailer": "^6.9.11",
     "jsonwebtoken": "^9.0.2",
-      "mongoose": "^8.0.0",
-      "mongodb": "^6.3.0"
+    "mongoose": "^8.0.0",
+    "mongodb": "^6.3.0",
+    "@sendgrid/mail": "^7.7.0"
+
   }
 }

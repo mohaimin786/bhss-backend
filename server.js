@@ -497,12 +497,9 @@ app.post('/api/submissions/:id/approve', authenticateToken, async (req, res) => 
     await submission.save();
 
     // SendGrid email
-    const msg = {
+       const msg = {
       to: submission.email,
-      from: {
-        email: process.env.FROM_EMAIL, // Your verified sender email
-        name: 'BHSS Council'
-      },
+      from: process.env.FROM_EMAIL, // Simple string format
       subject: 'BHSS Registration Approved',
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
@@ -553,10 +550,7 @@ app.post('/api/submissions/:id/reject', authenticateToken, async (req, res) => {
     // SendGrid rejection email
     const msg = {
       to: submission.email,
-      from: {
-        email: process.env.FROM_EMAIL,
-        name: 'BHSS Council'
-      },
+      from: process.env.FROM_EMAIL, // Simple string format
       subject: 'BHSS Registration Status',
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">

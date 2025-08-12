@@ -14,6 +14,10 @@ const sgMail = require('@sendgrid/mail');
 
 const app = express();
 sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+console.log('API Key exists:', !!process.env.SENDGRID_API_KEY);
+console.log('API Key starts with SG:', process.env.SENDGRID_API_KEY?.startsWith('SG.'));
+console.log('API Key length:', process.env.SENDGRID_API_KEY?.length);
+console.log('First 10 chars:', process.env.SENDGRID_API_KEY?.substring(0, 10));
 
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,

@@ -297,6 +297,7 @@ app.post('/api/user/login', async (req, res) => {
       success: true, 
       message: 'Login successful',
       token
+      localStorage.setItem('isLoggedIn', 'true');
     });
 
   } catch (err) {

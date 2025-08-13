@@ -695,21 +695,105 @@ app.post('/api/submissions/:id/approve', authenticateToken, async (req, res) => 
 app.post('/api/submissions/:id/reject', authenticateToken, async (req, res) => {
   try {
     console.log('Rejecting submission with ID:', req.params.id);
+    const { rejectionDetails, notes } = req.body;
     
     const submission = await Submission.findOne({ _id: req.params.id });
     if (!submission) {
       return res.status(404).json({ success: false, error: 'Submission not found' });
     }
 
+    // Update submission with rejection details
     submission.status = 'rejected';
+    submission.notes = notes || '';
+    if (rejectionDetails) {
+      submission.rejectionDetails = rejectionDetails;
+    }
     await submission.save();
 
-    // SendGrid rejection email
-    const msg = {
-      to: submission.email,
-      from: process.env.FROM_EMAIL, // Simple string format
-      subject: 'BHSS Registration Status',
-      html: `
+    // Customize email based on rejection reason
+    let emailSubject = 'BHSS Registration Status';
+    let emailHtml = '';
+    let emailText = '';
+
+    if (rejectionDetails) {
+      switch(rejectionDetails.reason) {
+        case 'age':
+          if (rejectionDetails.detail === 'lower') {
+            emailSubject = 'BHSS Registration - Age Requirement';
+            emailHtml = `
+              <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                <h2 style="color: #333;">BHSS Registration Update</h2>
+                <p>Hello <strong>${submission.fullName}</strong>,</p>
+                <p>Thank you for your interest in BHSS.</p>
+                <p>After careful consideration, we are unable to approve your registration at this time because you don't meet our minimum age requirement.</p>
+                <p>We encourage you to apply again in the future when you meet our age criteria.</p>
+                <p>Best regards,<br><strong>BHSS Council</strong></p>
+              </div>
+            `;
+            emailText = `Hello ${submission.fullName},\n\nThank you for your interest in BHSS.\n\nAfter careful consideration, we are unable to approve your registration at this time because you don't meet our minimum age requirement.\n\nWe encourage you to apply again in the future when you meet our age criteria.\n\nBest regards,\nBHSS Council`;
+          } else {
+            emailSubject = 'BHSS Registration - Age Requirement';
+            emailHtml = `
+              <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                <h2 style="color: #333;">BHSS Registration Update</h2>
+                <p>Hello <strong>${submission.fullName}</strong>,</p>
+                <p>Thank you for your interest in BHSS.</p>
+                <p>After careful consideration, we are unable to approve your registration at this time because you exceed our maximum age requirement.</p>
+                <p>Best regards,<br><strong>BHSS Council</strong></p>
+              </div>
+            `;
+            emailText = `Hello ${submission.fullName},\n\nThank you for your interest in BHSS.\n\nAfter careful consideration, we are unable to approve your registration at this time because you exceed our maximum age requirement.\n\nBest regards,\nBHSS Council`;
+          }
+          break;
+        
+        case 'grade':
+          if (rejectionDetails.detail === 'lower') {
+            emailSubject = 'BHSS Registration - Grade Requirement';
+            emailHtml = `
+              <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                <h2 style="color: #333;">BHSS Registration Update</h2>
+                <p>Hello <strong>${submission.fullName}</strong>,</p>
+                <p>Thank you for your interest in BHSS.</p>
+                <p>After careful consideration, we are unable to approve your registration at this time because you don't meet our minimum grade requirement.</p>
+                <p>We encourage you to apply again in the future when you meet our grade criteria.</p>
+                <p>Best regards,<br><strong>BHSS Council</strong></p>
+              </div>
+            `;
+            emailText = `Hello ${submission.fullName},\n\nThank you for your interest in BHSS.\n\nAfter careful consideration, we are unable to approve your registration at this time because you don't meet our minimum grade requirement.\n\nWe encourage you to apply again in the future when you meet our grade criteria.\n\nBest regards,\nBHSS Council`;
+          } else {
+            emailSubject = 'BHSS Registration - Grade Requirement';
+            emailHtml = `
+              <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                <h2 style="color: #333;">BHSS Registration Update</h2>
+                <p>Hello <strong>${submission.fullName}</strong>,</p>
+                <p>Thank you for your interest in BHSS.</p>
+                <p>After careful consideration, we are unable to approve your registration at this time because you exceed our maximum grade requirement.</p>
+                <p>Best regards,<br><strong>BHSS Council</strong></p>
+              </div>
+            `;
+            emailText = `Hello ${submission.fullName},\n\nThank you for your interest in BHSS.\n\nAfter careful consideration, we are unable to approve your registration at this time because you exceed our maximum grade requirement.\n\nBest regards,\nBHSS Council`;
+          }
+          break;
+          
+        case 'other':
+        default:
+          emailSubject = 'BHSS Registration Status';
+          emailHtml = `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+              <h2 style="color: #333;">BHSS Registration Update</h2>
+              <p>Hello <strong>${submission.fullName}</strong>,</p>
+              <p>Thank you for your interest in BHSS.</p>
+              <p>After careful consideration, we are unable to approve your registration at this time.</p>
+              <p>We encourage you to apply again in the future when you meet our requirements.</p>
+              <p>Best regards,<br><strong>BHSS Council</strong></p>
+            </div>
+          `;
+          emailText = `Hello ${submission.fullName},\n\nThank you for your interest in BHSS.\n\nAfter careful consideration, we are unable to approve your registration at this time.\n\nWe encourage you to apply again in the future when you meet our requirements.\n\nBest regards,\nBHSS Council`;
+      }
+    } else {
+      // Default rejection message if no reason specified
+      emailSubject = 'BHSS Registration Status';
+      emailHtml = `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
           <h2 style="color: #333;">BHSS Registration Update</h2>
           <p>Hello <strong>${submission.fullName}</strong>,</p>
@@ -718,14 +802,27 @@ app.post('/api/submissions/:id/reject', authenticateToken, async (req, res) => {
           <p>We encourage you to apply again in the future when you meet our requirements.</p>
           <p>Best regards,<br><strong>BHSS Council</strong></p>
         </div>
-      `,
-      text: `Hello ${submission.fullName},\n\nThank you for your interest in BHSS.\n\nAfter careful consideration, we are unable to approve your registration at this time.\n\nWe encourage you to apply again in the future.\n\nBest regards,\nBHSS Council`
+      `;
+      emailText = `Hello ${submission.fullName},\n\nThank you for your interest in BHSS.\n\nAfter careful consideration, we are unable to approve your registration at this time.\n\nWe encourage you to apply again in the future when you meet our requirements.\n\nBest regards,\nBHSS Council`;
+    }
+
+    // SendGrid rejection email
+    const msg = {
+      to: submission.email,
+      from: process.env.FROM_EMAIL,
+      subject: emailSubject,
+      html: emailHtml,
+      text: emailText
     };
 
     await sgMail.send(msg);
     console.log('Rejection email sent via SendGrid');
 
-    res.json({ success: true, message: 'User rejected and email sent' });
+    res.json({ 
+      success: true, 
+      message: 'User rejected and email sent',
+      rejectionDetails: rejectionDetails || null
+    });
   } catch (err) {
     console.error('Reject submission error:', err);
     res.status(500).json({ 

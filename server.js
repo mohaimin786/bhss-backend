@@ -62,6 +62,7 @@ const submissionSchema = new mongoose.Schema({
   prevCompetitions: String,
   skills: String,
   ideas: String,
+  role: String,
   status: { type: String, default: 'pending' },
   notes: { type: String, default: '' },
   timestamp: { type: Date, default: Date.now }
@@ -72,6 +73,7 @@ const userSchema = new mongoose.Schema({
   fullName: String,
   email: String,
   password: String,
+  role: String,
   createdAt: { type: Date, default: Date.now }
 }, { versionKey: false });
 
@@ -384,7 +386,7 @@ app.get('/api/submissions/export-filtered', authenticateToken, async (req, res) 
   try {
     const docs = await Submission.find({}).sort({ timestamp: -1 }).exec();
 
-    let csv = 'Full Name,Email,Country Code,Phone Number,Date of Birth,Grade,Is BH Student,Country,School Name,Subjects,Motivation\n';
+    let csv = 'Full Name,Email,Country Code,Phone Number,Date of Birth,Grade,Is BH Student,Country,School Name,Subjects,Role,Motivation\n';
 
     docs.forEach((sub) => {
       const escapeCsv = (str) => {
@@ -405,6 +407,7 @@ app.get('/api/submissions/export-filtered', authenticateToken, async (req, res) 
         escapeCsv(sub.country),
         escapeCsv(sub.school),
         escapeCsv(subjects),
+        escapeCsv(sub.role),
         escapeCsv(sub.motivation)
       ].join(',') + '\n';
     });
@@ -546,6 +549,7 @@ app.post('/api/submit', submissionLimiter, async (req, res) => {
       category,
       motivation,
       whyChosenSubjects,
+      role,
       heardAbout,
       social,
       prevCompetitions,
@@ -581,6 +585,7 @@ app.post('/api/submit', submissionLimiter, async (req, res) => {
       phone,
       dob,
       grade,
+      role,
       isBhStudent: isBhStudent === 'yes',
       bhBranch: bhBranch || null,
       section: section || null,

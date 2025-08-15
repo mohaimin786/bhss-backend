@@ -1,3 +1,4 @@
+
 // server.js
 const express = require('express');
 const path = require('path');
@@ -539,6 +540,7 @@ app.post('/api/submit', submissionLimiter, async (req, res) => {
       phone,
       dob,
       grade,
+      role,
       isBhStudent,
       bhBranch,
       section,
@@ -549,7 +551,7 @@ app.post('/api/submit', submissionLimiter, async (req, res) => {
       category,
       motivation,
       whyChosenSubjects,
-      role,
+     
       heardAbout,
       social,
       prevCompetitions,
@@ -585,7 +587,7 @@ app.post('/api/submit', submissionLimiter, async (req, res) => {
       phone,
       dob,
       grade,
-      role,
+      role: role || null ,
       isBhStudent: isBhStudent === 'yes',
       bhBranch: bhBranch || null,
       section: section || null,
@@ -604,7 +606,7 @@ app.post('/api/submit', submissionLimiter, async (req, res) => {
       status: 'pending',
       timestamp: new Date(),
     });
-
+  console.log('Submission object before saving:', submission)
     await submission.save();
     res.redirect('https://stackblitz-starters-uogm5vlf.vercel.app/thank-you.html');
 

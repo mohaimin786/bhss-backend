@@ -1,4 +1,3 @@
-
 // server.js
 const express = require('express');
 const path = require('path');
@@ -78,8 +77,43 @@ const userSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 }, { versionKey: false });
 
+// New Dashboard Info Schema
+const dashboardInfoSchema = new mongoose.Schema({
+  _id: { type: String, required: true },
+  fullName: String,
+  email: String,
+  countryCode: String,
+  phone: String,
+  dob: String,
+  grade: String,
+  isBhStudent: Boolean,
+  bhBranch: String,
+  section: String,
+  city: String,
+  school: String,
+  country: String,
+  subjects: [String],
+  category: String,
+  motivation: String,
+  whyChosenSubjects: String,
+  heardAbout: String,
+  social: String,
+  prevCompetitions: String,
+  skills: String,
+  ideas: String,
+  role: String,
+  status: { type: String, default: 'pending' },
+  notes: { type: String, default: '' },
+  timestamp: { type: Date, default: Date.now },
+  // Additional dashboard-specific fields (can be added later)
+  dashboardNotes: { type: String, default: '' },
+  priority: { type: String, enum: ['low', 'medium', 'high'], default: 'medium' },
+  lastUpdated: { type: Date, default: Date.now }
+}, { versionKey: false });
+
 const Submission = mongoose.model('Submission', submissionSchema);
 const User = mongoose.model('User', userSchema);
+const DashboardInfo = mongoose.model('DashboardInfo', dashboardInfoSchema);
 
 // JWT Secret
 const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(48).toString('hex');
@@ -164,7 +198,6 @@ app.use(function (req, res, next) {
 });
 
 // Helper functions
-// Add this to your helper functions in server.js
 function authenticateUser(req, res, next) {
   try {
     const token = req.headers.authorization?.split(' ')[1];
@@ -195,6 +228,7 @@ function authenticateUser(req, res, next) {
     });
   }
 }
+
 function createAdminToken(username) {
   const payload = { username, iss: 'bhss-backend' };
   return jwt.sign(payload, JWT_SECRET, { expiresIn: '1d' });
@@ -224,6 +258,52 @@ function checkToken(req) {
     return jwt.verify(token, JWT_SECRET);
   } catch {
     return null;
+  }
+}
+
+// Helper function to copy submission to dashboard info
+async function copySubmissionToDashboard(submissionData) {
+  try {
+    const dashboardData = {
+      _id: submissionData._id,
+      fullName: submissionData.fullName,
+      email: submissionData.email,
+      countryCode: submissionData.countryCode,
+      phone: submissionData.phone,
+      dob: submissionData.dob,
+      grade: submissionData.grade,
+      isBhStudent: submissionData.isBhStudent,
+      bhBranch: submissionData.bhBranch,
+      section: submissionData.section,
+      city: submissionData.city,
+      school: submissionData.school,
+      country: submissionData.country,
+      subjects: submissionData.subjects,
+      category: submissionData.category,
+      motivation: submissionData.motivation,
+      whyChosenSubjects: submissionData.whyChosenSubjects,
+      heardAbout: submissionData.heardAbout,
+      social: submissionData.social,
+      prevCompetitions: submissionData.prevCompetitions,
+      skills: submissionData.skills,
+      ideas: submissionData.ideas,
+      role: submissionData.role,
+      status: submissionData.status,
+      notes: submissionData.notes,
+      timestamp: submissionData.timestamp,
+      lastUpdated: new Date()
+    };
+
+    // Use upsert to update if exists, create if doesn't
+    await DashboardInfo.findOneAndUpdate(
+      { _id: submissionData._id },
+      dashboardData,
+      { upsert: true, new: true }
+    );
+
+    console.log(`Dashboard info updated/created for submission: ${submissionData._id}`);
+  } catch (err) {
+    console.error('Error copying submission to dashboard:', err);
   }
 }
 
@@ -259,7 +339,7 @@ app.post('/api/user/login', async (req, res) => {
         return res.status(401).json({ 
           success: false, 
           message: 'Your application is still under review. Please wait for approval.',
-          redirect: 'https://stackblitz-starters-uogm5vlf.vercel.app/index.html' // Create this page
+          redirect: 'https://stackblitz-starters-uogm5vlf.vercel.app/index.html'
         });
       }
       
@@ -267,11 +347,10 @@ app.post('/api/user/login', async (req, res) => {
         return res.status(401).json({ 
           success: false, 
           message: 'Your application was rejected. Please contact admin if you believe this is an error.',
-          redirect: 'https://stackblitz-starters-uogm5vlf.vercel.app/index.html' // Create this page
+          redirect: 'https://stackblitz-starters-uogm5vlf.vercel.app/index.html'
         });
       }
       
-      // Shouldn't reach here, but just in case
       return res.status(401).json({ 
         success: false, 
         message: 'Account not found. Please register first.',
@@ -310,6 +389,7 @@ app.post('/api/user/login', async (req, res) => {
     });
   }
 });
+
 // IP info route
 app.get('/api/ipinfo', ipinfoLimiter, async (req, res) => {
   try {
@@ -382,6 +462,136 @@ app.get('/api/rate-test', submissionLimiter, (req, res) => {
   });
 });
 
+// Dashboard Info Routes
+
+// Get all dashboard info (protected)
+app.get('/api/dashboard-info', authenticateToken, async (req, res) => {
+  try {
+    const docs = await DashboardInfo.find({}).sort({ timestamp: -1 }).exec();
+    res.json({ success: true, data: docs });
+  } catch (err) {
+    console.error('Fetch dashboard info error:', err);
+    res.status(500).json({ success: false, error: 'Database error' });
+  }
+});
+
+// Sync all submissions to dashboard info (protected)
+app.post('/api/dashboard-info/sync-all', authenticateToken, async (req, res) => {
+  try {
+    const submissions = await Submission.find({});
+    let syncedCount = 0;
+    
+    for (const submission of submissions) {
+      await copySubmissionToDashboard(submission);
+      syncedCount++;
+    }
+    
+    res.json({ 
+      success: true, 
+      message: `Synced ${syncedCount} submissions to dashboard info`,
+      synced: syncedCount
+    });
+  } catch (err) {
+    console.error('Sync dashboard info error:', err);
+    res.status(500).json({ success: false, error: 'Sync failed' });
+  }
+});
+
+// Update dashboard info item (protected)
+app.put('/api/dashboard-info/:id', authenticateToken, async (req, res) => {
+  try {
+    const id = req.params.id;
+    const { dashboardNotes, priority, ...otherFields } = req.body;
+    
+    const updateData = {
+      ...otherFields,
+      lastUpdated: new Date()
+    };
+    
+    if (dashboardNotes !== undefined) updateData.dashboardNotes = dashboardNotes;
+    if (priority !== undefined) updateData.priority = priority;
+    
+    const result = await DashboardInfo.updateOne(
+      { _id: id },
+      { $set: updateData }
+    );
+    
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ success: false, error: 'Dashboard info not found' });
+    }
+    
+    res.json({ success: true, updated: result.modifiedCount });
+  } catch (err) {
+    console.error('Update dashboard info error:', err);
+    res.status(500).json({ success: false, error: 'Database error' });
+  }
+});
+
+// Delete dashboard info item (protected)
+app.delete('/api/dashboard-info/:id', authenticateToken, async (req, res) => {
+  try {
+    const id = req.params.id;
+    const result = await DashboardInfo.deleteOne({ _id: id });
+    
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ success: false, error: 'Dashboard info not found' });
+    }
+    
+    res.json({ success: true, deleted: result.deletedCount });
+  } catch (err) {
+    console.error('Delete dashboard info error:', err);
+    res.status(500).json({ success: false, error: 'Database error' });
+  }
+});
+
+// Export dashboard info CSV (protected)
+app.get('/api/dashboard-info/export', authenticateToken, async (req, res) => {
+  try {
+    const docs = await DashboardInfo.find({}).sort({ timestamp: -1 }).exec();
+
+    let csv = 'Full Name,Email,Country Code,Phone Number,Date of Birth,Grade,Is BH Student,Country,School Name,Subjects,Role,Motivation,Priority,Dashboard Notes,Status\n';
+
+    docs.forEach((item) => {
+      const escapeCsv = (str) => {
+        if (!str) return '';
+        return `"${String(str).replace(/"/g, '""')}"`;
+      };
+
+      const subjects = item.subjects ? item.subjects.join('; ') : '';
+
+      csv += [
+        escapeCsv(item.fullName),
+        escapeCsv(item.email),
+        escapeCsv(item.countryCode),
+        escapeCsv(item.phone),
+        escapeCsv(item.dob),
+        escapeCsv(item.grade),
+        escapeCsv(item.isBhStudent ? 'Yes' : 'No'),
+        escapeCsv(item.country),
+        escapeCsv(item.school),
+        escapeCsv(subjects),
+        escapeCsv(item.role),
+        escapeCsv(item.motivation),
+        escapeCsv(item.priority),
+        escapeCsv(item.dashboardNotes),
+        escapeCsv(item.status)
+      ].join(',') + '\n';
+    });
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader(
+      'Content-Disposition',
+      'attachment; filename=dashboard-info-' + new Date().toISOString().slice(0, 10) + '.csv'
+    );
+    res.send(csv);
+  } catch (err) {
+    console.error('Dashboard export error:', err);
+    res.status(500).json({ success: false, error: 'Export failed' });
+  }
+});
+
+// Original Submission Routes (modified to also update dashboard info)
+
 // Export submissions CSV (protected)
 app.get('/api/submissions/export-filtered', authenticateToken, async (req, res) => {
   try {
@@ -436,13 +646,23 @@ app.delete('/api/submissions/bulk-delete', authenticateToken, async (req, res) =
     if (validIds.length === 0) {
       return res.status(400).json({ success: false, error: 'No valid IDs provided' });
     }
-    const result = await Submission.deleteMany({ _id: { $in: validIds } });
-    res.json({ success: true, deleted: result.deletedCount, message: `Deleted ${result.deletedCount} submissions` });
+    
+    // Delete from both collections
+    const submissionResult = await Submission.deleteMany({ _id: { $in: validIds } });
+    const dashboardResult = await DashboardInfo.deleteMany({ _id: { $in: validIds } });
+    
+    res.json({ 
+      success: true, 
+      deleted: submissionResult.deletedCount,
+      dashboardDeleted: dashboardResult.deletedCount,
+      message: `Deleted ${submissionResult.deletedCount} submissions and ${dashboardResult.deletedCount} dashboard entries`
+    });
   } catch (err) {
     console.error('Bulk delete error:', err);
     res.status(500).json({ success: false, error: 'Internal server error' });
   }
 });
+
 // Example protected route
 app.get('/api/user/profile', authenticateUser, async (req, res) => {
   try {
@@ -472,7 +692,7 @@ app.get('/api/user/profile', authenticateUser, async (req, res) => {
   }
 });
 
-// Bulk update submissions status (protected)
+// Bulk update submissions status (protected) - also updates dashboard
 app.put('/api/submissions/bulk-update', authenticateToken, async (req, res) => {
   try {
     const { ids, status } = req.body;
@@ -482,18 +702,31 @@ app.put('/api/submissions/bulk-update', authenticateToken, async (req, res) => {
     if (!['pending', 'approved', 'rejected'].includes(status)) {
       return res.status(400).json({ success: false, error: 'Invalid status' });
     }
-    const result = await Submission.updateMany(
+    
+    // Update submissions
+    const submissionResult = await Submission.updateMany(
       { _id: { $in: ids } },
       { $set: { status } }
     );
-    res.json({ success: true, updated: result.modifiedCount });
+    
+    // Update dashboard info
+    const dashboardResult = await DashboardInfo.updateMany(
+      { _id: { $in: ids } },
+      { $set: { status, lastUpdated: new Date() } }
+    );
+    
+    res.json({ 
+      success: true, 
+      updated: submissionResult.modifiedCount,
+      dashboardUpdated: dashboardResult.modifiedCount
+    });
   } catch (err) {
     console.error('Bulk update error:', err);
     res.status(500).json({ success: false, error: 'Database error' });
   }
 });
 
-// Update single submission (protected)
+// Update single submission (protected) - also updates dashboard
 app.put('/api/submissions/:id', authenticateToken, async (req, res) => {
   try {
     const id = req.params.id;
@@ -501,36 +734,55 @@ app.put('/api/submissions/:id', authenticateToken, async (req, res) => {
     if (!['pending', 'approved', 'rejected'].includes(status)) {
       return res.status(400).json({ success: false, error: 'Invalid status' });
     }
-    const result = await Submission.updateOne(
+    
+    // Update submission
+    const submissionResult = await Submission.updateOne(
       { _id: id },
       { $set: { status, notes: notes || '' } }
     );
-    if (result.matchedCount === 0) {
+    
+    if (submissionResult.matchedCount === 0) {
       return res.status(404).json({ success: false, error: 'Submission not found' });
     }
-    res.json({ success: true, updated: result.modifiedCount });
+    
+    // Update dashboard info
+    await DashboardInfo.updateOne(
+      { _id: id },
+      { $set: { status, notes: notes || '', lastUpdated: new Date() } }
+    );
+    
+    res.json({ success: true, updated: submissionResult.modifiedCount });
   } catch (err) {
     console.error('Update submission error:', err);
     res.status(500).json({ success: false, error: 'Database error' });
   }
 });
 
-// Delete single submission (protected)
+// Delete single submission (protected) - also deletes from dashboard
 app.delete('/api/submissions/:id', authenticateToken, async (req, res) => {
   try {
     const id = req.params.id;
-    const result = await Submission.deleteOne({ _id: id });
-    if (result.deletedCount === 0) {
+    
+    // Delete from both collections
+    const submissionResult = await Submission.deleteOne({ _id: id });
+    const dashboardResult = await DashboardInfo.deleteOne({ _id: id });
+    
+    if (submissionResult.deletedCount === 0) {
       return res.status(404).json({ success: false, error: 'Submission not found' });
     }
-    res.json({ success: true, deleted: result.deletedCount });
+    
+    res.json({ 
+      success: true, 
+      deleted: submissionResult.deletedCount,
+      dashboardDeleted: dashboardResult.deletedCount
+    });
   } catch (err) {
     console.error('Delete submission error:', err);
     res.status(500).json({ success: false, error: 'Database error' });
   }
 });
 
-// Create submission (public) with rate limiting except admin
+// Create submission (public) with rate limiting except admin - also copies to dashboard
 app.post('/api/submit', submissionLimiter, async (req, res) => {
   try {
     const {
@@ -551,7 +803,6 @@ app.post('/api/submit', submissionLimiter, async (req, res) => {
       category,
       motivation,
       whyChosenSubjects,
-     
       heardAbout,
       social,
       prevCompetitions,
@@ -587,7 +838,7 @@ app.post('/api/submit', submissionLimiter, async (req, res) => {
       phone,
       dob,
       grade,
-      role: role || null ,
+      role: role || null,
       isBhStudent: isBhStudent === 'yes',
       bhBranch: bhBranch || null,
       section: section || null,
@@ -606,8 +857,13 @@ app.post('/api/submit', submissionLimiter, async (req, res) => {
       status: 'pending',
       timestamp: new Date(),
     });
-  console.log('Submission object before saving:', submission)
+    
+    console.log('Submission object before saving:', submission);
     await submission.save();
+    
+    // Also copy to dashboard info
+    await copySubmissionToDashboard(submission);
+    
     res.redirect('https://stackblitz-starters-uogm5vlf.vercel.app/thank-you.html');
 
   } catch (err) {
@@ -627,7 +883,7 @@ app.get('/api/submissions', authenticateToken, async (req, res) => {
   }
 });
 
-// Approve submission (generate password, create user, send email)
+// Approve submission (generate password, create user, send email) - also updates dashboard
 app.post('/api/submissions/:id/approve', authenticateToken, async (req, res) => {
   try {
     console.log('Approving submission with ID:', req.params.id);
@@ -657,13 +913,20 @@ app.post('/api/submissions/:id/approve', authenticateToken, async (req, res) => 
       console.log('New user account created');
     }
 
+    // Update submission status
     submission.status = 'approved';
     await submission.save();
+    
+    // Update dashboard info
+    await DashboardInfo.updateOne(
+      { _id: req.params.id },
+      { $set: { status: 'approved', lastUpdated: new Date() } }
+    );
 
     // SendGrid email
-       const msg = {
+    const msg = {
       to: submission.email,
-      from: process.env.FROM_EMAIL, // Simple string format
+      from: process.env.FROM_EMAIL,
       subject: 'BHSS Registration Approved',
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
@@ -698,7 +961,7 @@ app.post('/api/submissions/:id/approve', authenticateToken, async (req, res) => 
   }
 });
 
-// Update your reject endpoint:
+// Reject submission - also updates dashboard
 app.post('/api/submissions/:id/reject', authenticateToken, async (req, res) => {
   try {
     console.log('Rejecting submission with ID:', req.params.id);
@@ -716,6 +979,17 @@ app.post('/api/submissions/:id/reject', authenticateToken, async (req, res) => {
       submission.rejectionDetails = rejectionDetails;
     }
     await submission.save();
+    
+    // Update dashboard info
+    const dashboardUpdate = {
+      status: 'rejected',
+      notes: notes || '',
+      lastUpdated: new Date()
+    };
+    if (rejectionDetails) {
+      dashboardUpdate.rejectionDetails = rejectionDetails;
+    }
+    await DashboardInfo.updateOne({ _id: req.params.id }, { $set: dashboardUpdate });
 
     // Customize email based on rejection reason
     let emailSubject = 'BHSS Registration Status';
@@ -838,6 +1112,7 @@ app.post('/api/submissions/:id/reject', authenticateToken, async (req, res) => {
     });
   }
 });
+
 // Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {

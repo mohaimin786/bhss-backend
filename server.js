@@ -128,7 +128,7 @@ const ADMIN_CREDENTIALS = {
 
 // Middlewares
 app.use(cors({
-  origin: 'https://stackblitz-starters-uogm5vlf.vercel.app',
+  origin: 'https://bhsciencesociety.vercel.app',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
@@ -143,7 +143,7 @@ const loginLimiter = rateLimit({
   max: 10, // limit each IP to 10 requests per windowMs
   handler: (req, res) => {
     // Redirect to index.html with error query param
-    res.redirect('https://stackblitz-starters-uogm5vlf.vercel.app/index.html?error=rateLimitReached');
+    res.redirect('https://bhsciencesociety.vercel.app/index.html?error=rateLimitReached');
   }
 });
 
@@ -176,7 +176,7 @@ const submissionLimiter = rateLimit({
   handler: function (req, res) {
     console.log('Rate limit exceeded for IP:', req.headers['x-forwarded-for'] || req.ip);
     // Redirect on limit reached instead of sending JSON
-    res.redirect('https://stackblitz-starters-uogm5vlf.vercel.app/index.html?error=rateLimitReached');
+    res.redirect('https://bhsciencesociety.vercel.app/index.html?error=rateLimitReached');
   },
   onLimitReached: function (req) {
     console.log('Rate limit reached for', req.headers['x-forwarded-for'] || req.ip, 'at', new Date());
@@ -331,7 +331,7 @@ app.post('/api/user/login', async (req, res) => {
         return res.status(401).json({ 
           success: false, 
           message: 'Email not registered. Please register first.',
-          redirect: 'https://stackblitz-starters-uogm5vlf.vercel.app/register.html'
+          redirect: 'https://bhsciencesociety.vercel.app/register.html'
         });
       }
       
@@ -339,7 +339,7 @@ app.post('/api/user/login', async (req, res) => {
         return res.status(401).json({ 
           success: false, 
           message: 'Your application is still under review. Please wait for approval.',
-          redirect: 'https://stackblitz-starters-uogm5vlf.vercel.app/index.html'
+          redirect: 'https://bhsciencesociety.vercel.app/index.html'
         });
       }
       
@@ -347,14 +347,14 @@ app.post('/api/user/login', async (req, res) => {
         return res.status(401).json({ 
           success: false, 
           message: 'Your application was rejected. Please contact admin if you believe this is an error.',
-          redirect: 'https://stackblitz-starters-uogm5vlf.vercel.app/index.html'
+          redirect: 'https://bhsciencesociety.vercel.app/index.html'
         });
       }
       
       return res.status(401).json({ 
         success: false, 
         message: 'Account not found. Please register first.',
-        redirect: 'https://stackblitz-starters-uogm5vlf.vercel.app/register.html'
+        redirect: 'https://bhsciencesociety.vercel.app/register.html'
       });
     }
 
@@ -864,7 +864,7 @@ app.post('/api/submit', submissionLimiter, async (req, res) => {
     // Also copy to dashboard info
     await copySubmissionToDashboard(submission);
     
-    res.redirect('https://stackblitz-starters-uogm5vlf.vercel.app/thank-you.html');
+    res.redirect('https://bhsciencesociety.vercel.app/thank-you.html');
 
   } catch (err) {
     console.error('Submission error:', err);

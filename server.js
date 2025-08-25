@@ -308,10 +308,10 @@ async function copySubmissionToDashboard(submissionData) {
 }
 
 // Routes
-// User login route
+// User login route with remember me functionality
 app.post('/api/user/login', async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password, rememberMe } = req.body;
     
     if (!email || !password) {
       return res.status(400).json({ 
@@ -354,7 +354,7 @@ app.post('/api/user/login', async (req, res) => {
       return res.status(401).json({ 
         success: false, 
         message: 'Account not found. Please register first.',
-        redirect: 'https://bhsciencesociety.vercel.app/register.html'
+          redirect: 'https://bhsciencesociety.vercel.app/register.html'
       });
     }
 
@@ -368,17 +368,19 @@ app.post('/api/user/login', async (req, res) => {
       });
     }
 
-    // Create JWT token
+    // Create JWT token with different expiration based on remember me
+    const tokenExpiry = rememberMe ? '30d' : '1d';
     const token = jwt.sign(
       { userId: user._id, email: user.email }, 
       JWT_SECRET, 
-      { expiresIn: '1d' }
+      { expiresIn: tokenExpiry }
     );
 
     res.json({ 
       success: true, 
       message: 'Login successful',
-      token
+      token,
+      expiresIn: tokenExpiry
     });
 
   } catch (err) {
@@ -386,6 +388,82 @@ app.post('/api/user/login', async (req, res) => {
     res.status(500).json({ 
       success: false, 
       message: 'Server error during login' 
+    });
+  }
+});
+
+// Forgot Password route
+app.post('/api/user/forgot-password', async (req, res) => {
+  try {
+    const { email } = req.body;
+    
+    if (!email) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Email is required' 
+      });
+    }
+
+    // Check if user exists
+    const user = await User.findOne({ email });
+    
+    if (!user) {
+      // Check if there's a submission with this email
+      const submission = await Submission.findOne({ email });
+      
+      if (!submission) {
+        return res.status(404).json({ 
+          success: false, 
+          message: 'Email not found in our system' 
+        });
+      }
+      
+      if (submission.status !== 'approved') {
+        return res.status(401).json({ 
+          success: false, 
+          message: 'Your account has not been approved yet' 
+        });
+      }
+      
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Email not found in our system' 
+      });
+    }
+
+    // Send email with password (in a real app, you might want to reset the password instead)
+    const msg = {
+      to: user.email,
+      from: process.env.FROM_EMAIL,
+      subject: 'BHSS Password Recovery',
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <h2 style="color: #00ffae;">Password Recovery</h2>
+          <p>Hello <strong>${user.fullName}</strong>,</p>
+          <p>Here is your current password for BHSS:</p>
+          <div style="background-color: #f0f8f0; padding: 15px; border-left: 4px solid #00ffae; margin: 20px 0;">
+            <p style="font-size: 1.2em; font-weight: bold;">${user.password}</p>
+          </div>
+          <p style="font-size: 0.9em; color: #666;">For security reasons, we recommend changing your password after logging in.</p>
+          <p>Best regards,<br><strong>BHSS Council</strong></p>
+        </div>
+      `,
+      text: `Hello ${user.fullName},\n\nHere is your current password for BHSS: ${user.password}\n\nFor security reasons, we recommend changing your password after logging in.\n\nBest regards,\nBHSS Council`
+    };
+
+    await sgMail.send(msg);
+    console.log('Password recovery email sent');
+
+    res.json({ 
+      success: true, 
+      message: 'Password sent to your email' 
+    });
+
+  } catch (err) {
+    console.error('Password recovery error:', err);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Server error during password recovery' 
     });
   }
 });

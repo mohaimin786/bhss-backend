@@ -1127,7 +1127,7 @@ app.get('/api/submissions', authenticateToken, async (req, res) {
     console.error('Fetch submissions error:', err);
     res.status(500).json({ success: false, error: 'Database error' });
   }
-});
+};
 
 // Approve submission (generate password, create user, send email) - also updates dashboard
 app.post('/api/submissions/:id/approve', authenticateToken, async (req, res) => {

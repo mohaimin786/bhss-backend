@@ -1,3 +1,8 @@
+# Complete server.js with Secure Password Reset
+
+Here's the complete server.js file with all the changes for the secure password reset system:
+
+```javascript
 // server.js
 const express = require('express');
 const path = require('path');
@@ -40,7 +45,7 @@ mongoose.connect(process.env.MONGO_URI, {
 
 // Schemas & Models
 const submissionSchema = new mongoose.Schema({
-  _id: { type: String, required: true }, // string _id for NeDB compatibility
+  _id: { type: String, required: true },
   fullName: String,
   email: String,
   countryCode: String,
@@ -77,7 +82,14 @@ const userSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 }, { versionKey: false });
 
-// New Dashboard Info Schema
+// Password reset token schema
+const passwordResetTokenSchema = new mongoose.Schema({
+  userId: { type: String, required: true, ref: 'User' },
+  token: { type: String, required: true },
+  expires: { type: Date, required: true },
+  createdAt: { type: Date, default: Date.now }
+}, { versionKey: false });
+
 const dashboardInfoSchema = new mongoose.Schema({
   _id: { type: String, required: true },
   fullName: String,
@@ -105,7 +117,6 @@ const dashboardInfoSchema = new mongoose.Schema({
   status: { type: String, default: 'pending' },
   notes: { type: String, default: '' },
   timestamp: { type: Date, default: Date.now },
-  // Additional dashboard-specific fields (can be added later)
   dashboardNotes: { type: String, default: '' },
   priority: { type: String, enum: ['low', 'medium', 'high'], default: 'medium' },
   lastUpdated: { type: Date, default: Date.now }
@@ -113,6 +124,7 @@ const dashboardInfoSchema = new mongoose.Schema({
 
 const Submission = mongoose.model('Submission', submissionSchema);
 const User = mongoose.model('User', userSchema);
+const PasswordResetToken = mongoose.model('PasswordResetToken', passwordResetTokenSchema);
 const DashboardInfo = mongoose.model('DashboardInfo', dashboardInfoSchema);
 
 // JWT Secret
@@ -128,7 +140,7 @@ const ADMIN_CREDENTIALS = {
 
 // Middlewares
 app.use(cors({
-  origin: 'https://bhsciencesociety.vercel.app',
+  origin: ['https://bhsciencesociety.vercel.app', 'http://localhost:3000'],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
@@ -139,16 +151,21 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.static('public'));
 
 const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 10, // limit each IP to 10 requests per windowMs
+  windowMs: 15 * 60 * 1000,
+  max: 10,
   handler: (req, res) => {
-    // Redirect to index.html with error query param
     res.redirect('https://bhsciencesociety.vercel.app/index.html?error=rateLimitReached');
   }
 });
 
+const passwordResetLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 3,
+  message: 'Too many password reset requests, please try again later'
+});
+
 const submissionLimiter = rateLimit({
-  windowMs: 24 * 60 * 60 * 1000, // 24 hours
+  windowMs: 24 * 60 * 60 * 1000,
   max: 3,
   keyGenerator: function (req) {
     const forwarded = req.headers['x-forwarded-for'];
@@ -166,7 +183,7 @@ const submissionLimiter = rateLimit({
       if (!token) return false;
       const decoded = jwt.verify(token, JWT_SECRET);
       if (decoded && decoded.username === (process.env.ADMIN_USER || 'BHSS_COUNCIL')) {
-        return true; // Skip rate limit for authenticated admin JWT
+        return true;
       }
       return false;
     } catch {
@@ -175,7 +192,6 @@ const submissionLimiter = rateLimit({
   },
   handler: function (req, res) {
     console.log('Rate limit exceeded for IP:', req.headers['x-forwarded-for'] || req.ip);
-    // Redirect on limit reached instead of sending JSON
     res.redirect('https://bhsciencesociety.vercel.app/index.html?error=rateLimitReached');
   },
   onLimitReached: function (req) {
@@ -213,7 +229,7 @@ function authenticateUser(req, res, next) {
       if (err) {
         return res.status(403).json({ 
           success: false, 
-          message: 'Invalid or expired token' 
+      message: 'Invalid or expired token' 
         });
       }
       
@@ -294,7 +310,6 @@ async function copySubmissionToDashboard(submissionData) {
       lastUpdated: new Date()
     };
 
-    // Use upsert to update if exists, create if doesn't
     await DashboardInfo.findOneAndUpdate(
       { _id: submissionData._id },
       dashboardData,
@@ -308,6 +323,7 @@ async function copySubmissionToDashboard(submissionData) {
 }
 
 // Routes
+
 // User login route with remember me functionality
 app.post('/api/user/login', async (req, res) => {
   try {
@@ -324,7 +340,6 @@ app.post('/api/user/login', async (req, res) => {
     const user = await User.findOne({ email });
     
     if (!user) {
-      // Check if there's a submission with this email
       const submission = await Submission.findOne({ email });
       
       if (!submission) {
@@ -354,11 +369,11 @@ app.post('/api/user/login', async (req, res) => {
       return res.status(401).json({ 
         success: false, 
         message: 'Account not found. Please register first.',
-          redirect: 'https://bhsciencesociety.vercel.app/register.html'
+        redirect: 'https://bhsciencesociety.vercel.app/register.html'
       });
     }
 
-    // Compare passwords
+    // Compare passwords using bcrypt
     const isMatch = await bcrypt.compare(password, user.password);
     
     if (!isMatch) {
@@ -392,8 +407,8 @@ app.post('/api/user/login', async (req, res) => {
   }
 });
 
-// Forgot Password route
-app.post('/api/user/forgot-password', async (req, res) => {
+// Forgot Password route - Send reset link
+app.post('/api/user/forgot-password', passwordResetLimiter, async (req, res) => {
   try {
     const { email } = req.body;
     
@@ -431,39 +446,196 @@ app.post('/api/user/forgot-password', async (req, res) => {
       });
     }
 
-    // Send email with password (in a real app, you might want to reset the password instead)
+    // Generate reset token
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    const hashedToken = crypto.createHash('sha256').update(resetToken).digest('hex');
+    
+    // Set expiration (1 hour)
+    const expires = new Date(Date.now() + 60 * 60 * 1000);
+    
+    // Delete any existing reset tokens for this user
+    await PasswordResetToken.deleteMany({ userId: user._id });
+    
+    // Save new reset token
+    const resetTokenDoc = new PasswordResetToken({
+      userId: user._id,
+      token: hashedToken,
+      expires: expires
+    });
+    
+    await resetTokenDoc.save();
+    
+    // Create reset URL
+    const resetUrl = `https://bhsciencesociety.vercel.app/reset-password.html?token=${resetToken}&id=${user._id}`;
+    
+    // Send email with reset link
     const msg = {
       to: user.email,
       from: process.env.FROM_EMAIL,
-      subject: 'BHSS Password Recovery',
+      subject: 'BHSS Password Reset',
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2 style="color: #00ffae;">Password Recovery</h2>
+          <h2 style="color: #00ffae;">Password Reset Request</h2>
           <p>Hello <strong>${user.fullName}</strong>,</p>
-          <p>Here is your current password for BHSS:</p>
-          <div style="background-color: #f0f8f0; padding: 15px; border-left: 4px solid #00ffae; margin: 20px 0;">
-            <p style="font-size: 1.2em; font-weight: bold;">${user.password}</p>
+          <p>You requested to reset your password. Click the button below to reset it:</p>
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="${resetUrl}" style="background-color: #00ffae; color: #0f111a; padding: 15px 30px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block;">
+              Reset Password
+            </a>
           </div>
-          <p style="font-size: 0.9em; color: #666;">For security reasons, we recommend changing your password after logging in.</p>
+          <p style="font-size: 0.9em; color: #666;">This link will expire in 1 hour for security reasons.</p>
+          <p>If you didn't request this reset, please ignore this email.</p>
           <p>Best regards,<br><strong>BHSS Council</strong></p>
         </div>
       `,
-      text: `Hello ${user.fullName},\n\nHere is your current password for BHSS: ${user.password}\n\nFor security reasons, we recommend changing your password after logging in.\n\nBest regards,\nBHSS Council`
+      text: `Hello ${user.fullName},\n\nYou requested to reset your password. Use this link to reset it:\n\n${resetUrl}\n\nThis link will expire in 1 hour for security reasons.\n\nIf you didn't request this reset, please ignore this email.\n\nBest regards,\nBHSS Council`
     };
 
     await sgMail.send(msg);
-    console.log('Password recovery email sent');
+    console.log('Password reset email sent');
 
     res.json({ 
       success: true, 
-      message: 'Password sent to your email' 
+      message: 'Password reset link sent to your email' 
     });
 
   } catch (err) {
-    console.error('Password recovery error:', err);
+    console.error('Password reset error:', err);
     res.status(500).json({ 
       success: false, 
-      message: 'Server error during password recovery' 
+      message: 'Server error during password reset' 
+    });
+  }
+});
+
+// Verify reset token
+app.get('/api/user/verify-reset-token', async (req, res) => {
+  try {
+    const { token, userId } = req.query;
+    
+    if (!token || !userId) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Token and user ID are required' 
+      });
+    }
+
+    // Hash the token
+    const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
+    
+    // Find the token
+    const resetToken = await PasswordResetToken.findOne({
+      userId: userId,
+      token: hashedToken,
+      expires: { $gt: new Date() }
+    });
+
+    if (!resetToken) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Invalid or expired reset token' 
+      });
+    }
+
+    res.json({ 
+      success: true, 
+      message: 'Token is valid' 
+    });
+
+  } catch (err) {
+    console.error('Token verification error:', err);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Server error during token verification' 
+    });
+  }
+});
+
+// Reset password with token
+app.post('/api/user/reset-password', async (req, res) => {
+  try {
+    const { token, userId, password } = req.body;
+    
+    if (!token || !userId || !password) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Token, user ID, and password are required' 
+      });
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Password must be at least 6 characters long' 
+      });
+    }
+
+    // Hash the token
+    const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
+    
+    // Find the token
+    const resetToken = await PasswordResetToken.findOne({
+      userId: userId,
+      token: hashedToken,
+      expires: { $gt: new Date() }
+    });
+
+    if (!resetToken) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Invalid or expired reset token' 
+      });
+    }
+
+    // Find user
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'User not found' 
+      });
+    }
+
+    // Hash new password
+    const hashedPassword = await bcrypt.hash(password, 10);
+    
+    // Update user password
+    user.password = hashedPassword;
+    await user.save();
+    
+    // Delete the used token
+    await PasswordResetToken.deleteMany({ userId: userId });
+    
+    // Send confirmation email
+    const msg = {
+      to: user.email,
+      from: process.env.FROM_EMAIL,
+      subject: 'BHSS Password Changed',
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <h2 style="color: #00ffae;">Password Changed Successfully</h2>
+          <p>Hello <strong>${user.fullName}</strong>,</p>
+          <p>Your password has been successfully changed.</p>
+          <p>If you did not make this change, please contact us immediately.</p>
+          <p>Best regards,<br><strong>BHSS Council</strong></p>
+        </div>
+      `,
+      text: `Hello ${user.fullName},\n\nYour password has been successfully changed.\n\nIf you did not make this change, please contact us immediately.\n\nBest regards,\nBHSS Council`
+    };
+
+    await sgMail.send(msg);
+    console.log('Password changed confirmation email sent');
+
+    res.json({ 
+      success: true, 
+      message: 'Password reset successfully' 
+    });
+
+  } catch (err) {
+    console.error('Password reset error:', err);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Server error during password reset' 
     });
   }
 });
@@ -702,6 +874,7 @@ app.get('/api/submissions/export-filtered', authenticateToken, async (req, res) 
     });
 
     res.setHeader('Content-Type', 'text/csv');
+// server.js (continued)
     res.setHeader(
       'Content-Disposition',
       'attachment; filename=filtered-submissions-' + new Date().toISOString().slice(0, 10) + '.csv'
@@ -951,7 +1124,7 @@ app.post('/api/submit', submissionLimiter, async (req, res) => {
 });
 
 // Get all submissions (protected)
-app.get('/api/submissions', authenticateToken, async (req, res) => {
+app.get('/api/submissions', authenticateToken, async (req, res) {
   try {
     const docs = await Submission.find({}).sort({ timestamp: -1 }).exec();
     res.json({ success: true, data: docs });
@@ -1111,7 +1284,7 @@ app.post('/api/submissions/:id/reject', authenticateToken, async (req, res) => {
             emailHtml = `
               <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
                 <h2 style="color: #333;">BHSS Registration Update</h2>
-                <p>Hello <strong>${submission.fullName}</strong>,</p>
+                <p>Hello <strong>${submission.fullName</strong>,</p>
                 <p>Thank you for your interest in BHSS.</p>
                 <p>After careful consideration, we are unable to approve your registration at this time because you don't meet our minimum grade requirement.</p>
                 <p>We encourage you to apply again in the future when you meet our grade criteria.</p>

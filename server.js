@@ -1,8 +1,3 @@
-# Complete server.js with Secure Password Reset
-
-Here's the complete server.js file with all the changes for the secure password reset system:
-
-```javascript
 // server.js
 const express = require('express');
 const path = require('path');

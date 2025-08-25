@@ -1278,7 +1278,7 @@ app.post('/api/submissions/:id/reject', authenticateToken, async (req, res) => {
             emailHtml = `
               <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
                 <h2 style="color: #333;">BHSS Registration Update</h2>
-                <p>Hello <strong>${submission.fullName</strong>,</p>
+                <p>Hello <strong>${submission.fullName}</strong>,</p>
                 <p>Thank you for your interest in BHSS.</p>
                 <p>After careful consideration, we are unable to approve your registration at this time because you don't meet our minimum grade requirement.</p>
                 <p>We encourage you to apply again in the future when you meet our grade criteria.</p>

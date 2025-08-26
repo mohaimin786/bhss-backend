@@ -27,7 +27,19 @@ const upload = multer({
   }
 });
 const app = express();
+app.use(express.static('public'));
 
+// Serve sitemap.xml with proper content type
+app.get('/sitemap.xml', (req, res) => {
+  res.set('Content-Type', 'application/xml');
+  res.sendFile(path.join(__dirname, 'public', 'sitemap.xml'));
+});
+
+// Serve robots.txt with proper content type  
+app.get('/robots.txt', (req, res) => {
+  res.set('Content-Type', 'text/plain');
+  res.sendFile(path.join(__dirname, 'public', 'robots.txt'));
+});
 // Verify and set API key
 const apiKey = process.env.SENDGRID_API_KEY?.trim();
 if (!apiKey) {

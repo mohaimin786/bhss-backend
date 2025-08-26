@@ -11,7 +11,21 @@ const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const mongoose = require('mongoose');
 const sgMail = require('@sendgrid/mail');
-
+const multer = require('multer');
+const storage = multer.memoryStorage();
+const upload = multer({ 
+  storage: storage,
+  limits: {
+    fileSize: 2 * 1024 * 1024 // 2MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only image files are allowed'), false);
+    }
+  }
+});
 const app = express();
 
 // Verify and set API key
@@ -71,12 +85,24 @@ const submissionSchema = new mongoose.Schema({
 const userSchema = new mongoose.Schema({
   _id: { type: String, required: true },
   fullName: String,
-  email: String,
+  email: { type: String, unique: true },
   password: String,
-  role: String,
-  createdAt: { type: Date, default: Date.now }
+  role: { type: String, default: 'member' },
+  isActive: { type: Boolean, default: true },
+  lastLogin: Date,
+  loginCount: { type: Number, default: 0 },
+  preferences: {
+    theme: { type: String, default: 'dark' },
+    notifications: { type: Boolean, default: true },
+    emailUpdates: { type: Boolean, default: true }
+  },
+  createdAt: { type: Date, default: Date.now },
+  updatedAt: { type: Date, default: Date.now }
 }, { versionKey: false });
-
+userSchema.pre('save', function(next) {
+  this.updatedAt = Date.now();
+  next();
+});
 // Password reset token schema
 const passwordResetTokenSchema = new mongoose.Schema({
   userId: { type: String, required: true, ref: 'User' },
@@ -84,6 +110,7 @@ const passwordResetTokenSchema = new mongoose.Schema({
   expires: { type: Date, required: true },
   createdAt: { type: Date, default: Date.now }
 }, { versionKey: false });
+// Add these fields to your existing dashboardInfoSchema:
 
 const dashboardInfoSchema = new mongoose.Schema({
   _id: { type: String, required: true },
@@ -109,6 +136,13 @@ const dashboardInfoSchema = new mongoose.Schema({
   skills: String,
   ideas: String,
   role: String,
+  bio: String,
+  linkedin: String,
+  github: String,
+  twitter: String,
+  instagram: String,
+  website: String,
+  avatar: String,
   status: { type: String, default: 'pending' },
   notes: { type: String, default: '' },
   timestamp: { type: Date, default: Date.now },
@@ -1206,7 +1240,340 @@ app.post('/api/submissions/:id/approve', authenticateToken, async (req, res) => 
   }
 });
 
+// Add these endpoints to your existing server.js file
+
 // Get user profile
+app.get('/api/user/profile', authenticateUser, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId);
+    
+    if (!user) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'User not found' 
+      });
+    }
+
+    // Get additional profile data from dashboard info
+    const dashboardInfo = await DashboardInfo.findOne({ email: user.email });
+    
+    // Combine user data with dashboard info
+    const profileData = {
+      email: user.email,
+      fullName: user.fullName,
+      createdAt: user.createdAt,
+      // Include dashboard info if available
+      ...(dashboardInfo && {
+        phone: dashboardInfo.phone,
+        dob: dashboardInfo.dob,
+        grade: dashboardInfo.grade,
+        school: dashboardInfo.school,
+        city: dashboardInfo.city,
+        country: dashboardInfo.country,
+        bio: dashboardInfo.bio,
+        linkedin: dashboardInfo.linkedin,
+        github: dashboardInfo.github,
+        twitter: dashboardInfo.twitter,
+        instagram: dashboardInfo.instagram,
+        website: dashboardInfo.website,
+        avatar: dashboardInfo.avatar
+      })
+    };
+
+    res.json({ 
+      success: true, 
+      profile: profileData
+    });
+  } catch (err) {
+    console.error('Profile fetch error:', err);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Server error fetching profile' 
+    });
+  }
+});
+
+// Update user profile
+app.put('/api/user/profile', authenticateUser, async (req, res) => {
+  try {
+    const {
+      fullName,
+      phone,
+      dob,
+      grade,
+      school,
+      city,
+      country,
+      bio,
+      linkedin,
+      github,
+      twitter,
+      instagram,
+      website
+    } = req.body;
+
+    // Update user basic info
+    const user = await User.findById(req.user.userId);
+    if (!user) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'User not found' 
+      });
+    }
+
+    if (fullName) user.fullName = fullName;
+    await user.save();
+
+    // Update or create dashboard info
+    const dashboardData = {
+      fullName: fullName || user.fullName,
+      email: user.email,
+      phone: phone || null,
+      dob: dob || null,
+      grade: grade || null,
+      school: school || null,
+      city: city || null,
+      country: country || null,
+      bio: bio || null,
+      linkedin: linkedin || null,
+      github: github || null,
+      twitter: twitter || null,
+      instagram: instagram || null,
+      website: website || null,
+      lastUpdated: new Date()
+    };
+
+    await DashboardInfo.findOneAndUpdate(
+      { email: user.email },
+      dashboardData,
+      { upsert: true, new: true }
+    );
+
+    res.json({ 
+      success: true, 
+      message: 'Profile updated successfully',
+      profile: {
+        email: user.email,
+        fullName: user.fullName,
+        phone,
+        dob,
+        grade,
+        school,
+        city,
+        country,
+        bio,
+        linkedin,
+        github,
+        twitter,
+        instagram,
+        website
+      }
+    });
+  } catch (err) {
+    console.error('Profile update error:', err);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Server error updating profile' 
+    });
+  }
+});
+
+// Upload avatar endpoint
+app.post('/api/user/avatar', authenticateUser, async (req, res) => {
+  try {
+    // In a real implementation, you would handle file upload here
+    // For this example, we'll simulate processing and return a success response
+    
+    const { avatarData } = req.body;
+    
+    if (!avatarData) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Avatar data is required' 
+      });
+    }
+
+    // Get user
+    const user = await User.findById(req.user.userId);
+    if (!user) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'User not found' 
+      });
+    }
+
+    // Update avatar in dashboard info
+    await DashboardInfo.findOneAndUpdate(
+      { email: user.email },
+      { 
+        avatar: avatarData,
+        lastUpdated: new Date()
+      },
+      { upsert: true }
+    );
+
+    res.json({ 
+      success: true, 
+      message: 'Avatar updated successfully',
+      avatar: avatarData
+    });
+  } catch (err) {
+    console.error('Avatar upload error:', err);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Server error uploading avatar' 
+    });
+  }
+});
+
+// Change password endpoint
+app.post('/api/user/change-password', authenticateUser, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Current password and new password are required' 
+      });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'New password must be at least 6 characters long' 
+      });
+    }
+
+    // Get user
+    const user = await User.findById(req.user.userId);
+    if (!user) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'User not found' 
+      });
+    }
+
+    // Verify current password
+    const isMatch = await bcrypt.compare(currentPassword, user.password);
+    if (!isMatch) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Current password is incorrect' 
+      });
+    }
+
+    // Hash new password
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    user.password = hashedPassword;
+    await user.save();
+
+    // Send confirmation email
+    try {
+      const msg = {
+        to: user.email,
+        from: process.env.FROM_EMAIL,
+        subject: 'BHSS Password Changed',
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #00ffae;">Password Changed Successfully</h2>
+            <p>Hello <strong>${user.fullName}</strong>,</p>
+            <p>Your password has been successfully changed.</p>
+            <p>If you did not make this change, please contact us immediately.</p>
+            <p>Best regards,<br><strong>BHSS Council</strong></p>
+          </div>
+        `,
+        text: `Hello ${user.fullName},\n\nYour password has been successfully changed.\n\nIf you did not make this change, please contact us immediately.\n\nBest regards,\nBHSS Council`
+      };
+
+      await sgMail.send(msg);
+      console.log('Password change confirmation email sent');
+    } catch (emailError) {
+      console.error('Error sending password change email:', emailError);
+      // Don't fail the request if email fails
+    }
+
+    res.json({ 
+      success: true, 
+      message: 'Password changed successfully' 
+    });
+  } catch (err) {
+    console.error('Password change error:', err);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Server error changing password' 
+    });
+  }
+});
+
+// Delete account endpoint
+app.delete('/api/user/account', authenticateUser, async (req, res) => {
+  try {
+    const { confirmation } = req.body;
+    
+    if (!confirmation || confirmation !== 'DELETE MY ACCOUNT') {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Confirmation phrase is required to delete account' 
+      });
+    }
+
+    // Get user
+    const user = await User.findById(req.user.userId);
+    if (!user) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'User not found' 
+      });
+    }
+
+    // Delete user and associated data
+    await User.deleteOne({ _id: req.user.userId });
+    await DashboardInfo.deleteOne({ email: user.email });
+    
+    // In a real implementation, you might want to soft delete or archive
+    // instead of permanent deletion
+
+    // Send confirmation email
+    try {
+      const msg = {
+        to: user.email,
+        from: process.env.FROM_EMAIL,
+        subject: 'BHSS Account Deleted',
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #ff4757;">Account Deleted</h2>
+            <p>Hello <strong>${user.fullName}</strong>,</p>
+            <p>Your BHSS account has been successfully deleted.</p>
+            <p>We're sorry to see you go. If this was a mistake or you change your mind, you can always register again.</p>
+            <p>Best regards,<br><strong>BHSS Council</strong></p>
+          </div>
+        `,
+        text: `Hello ${user.fullName},\n\nYour BHSS account has been successfully deleted.\n\nWe're sorry to see you go. If this was a mistake or you change your mind, you can always register again.\n\nBest regards,\nBHSS Council`
+      };
+
+      await sgMail.send(msg);
+      console.log('Account deletion email sent');
+    } catch (emailError) {
+      console.error('Error sending account deletion email:', emailError);
+      // Don't fail the request if email fails
+    }
+
+    res.json({ 
+      success: true, 
+      message: 'Account deleted successfully' 
+    });
+  } catch (err) {
+    console.error('Account deletion error:', err);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Server error deleting account' 
+    });
+  }
+});
+
+// Update DashboardInfo schema to include new fields
+
 
 // Reject submission - also updates dashboard
 app.post('/api/submissions/:id/reject', authenticateToken, async (req, res) => {
@@ -1359,7 +1726,80 @@ app.post('/api/submissions/:id/reject', authenticateToken, async (req, res) => {
     });
   }
 });
+app.post('/api/user/avatar-upload', authenticateUser, upload.single('avatar'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'No file uploaded' 
+      });
+    }
 
+    // Get user
+    const user = await User.findById(req.user.userId);
+    if (!user) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'User not found' 
+      });
+    }
+
+    // Convert image to base64 for storage
+    const base64Image = req.file.buffer.toString('base64');
+    const avatarData = `data:${req.file.mimetype};base64,${base64Image}`;
+
+    // Update avatar in dashboard info
+    await DashboardInfo.findOneAndUpdate(
+      { email: user.email },
+      { 
+        avatar: avatarData,
+        lastUpdated: new Date()
+      },
+      { upsert: true }
+    );
+
+    res.json({ 
+      success: true, 
+      message: 'Avatar uploaded successfully',
+      avatar: avatarData
+    });
+  } catch (err) {
+    console.error('Avatar upload error:', err);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Server error uploading avatar' 
+    });
+  }
+});
+// Add this endpoint to get dashboard info for the current user
+app.get('/api/user/dashboard-info', authenticateUser, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId);
+    if (!user) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'User not found' 
+      });
+    }
+
+    const dashboardInfo = await DashboardInfo.findOne({ email: user.email });
+    
+    if (!dashboardInfo) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Dashboard info not found' 
+      });
+    }
+
+    res.json({ 
+      success: true, 
+      data: dashboardInfo 
+    });
+  } catch (err) {
+    console.error('Fetch user dashboard info error:', err);
+    res.status(500).json({ success: false, error: 'Database error' });
+  }
+});
 // Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {

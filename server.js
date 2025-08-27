@@ -40,6 +40,8 @@ app.get('/robots.txt', (req, res) => {
   res.set('Content-Type', 'text/plain');
   res.sendFile(path.join(__dirname, 'public', 'robots.txt'));
 });
+// Enhanced security headers
+
 // Verify and set API key
 const apiKey = process.env.SENDGRID_API_KEY?.trim();
 if (!apiKey) {
@@ -180,11 +182,7 @@ const ADMIN_CREDENTIALS = {
 };
 
 // Middlewares
-app.use(cors({
-  origin: ['https://bhsciencesociety.vercel.app', 'http://localhost:3000'],
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-}));
+
 app.set('trust proxy', 1);
 app.use(helmet());
 app.use(express.json());
@@ -253,7 +251,35 @@ app.use(function (req, res, next) {
   res.setHeader('X-XSS-Protection', '1; mode=block');
   next();
 });
+// Enhanced security headers - Add this right after your other middleware
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'", "https://bhsciencesociety.vercel.app"],
+      styleSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com", "https://fonts.googleapis.com", "https://bhsciencesociety.vercel.app"],
+      fontSrc: ["'self'", "https://fonts.gstatic.com", "https://cdnjs.cloudflare.com", "https://bhsciencesociety.vercel.app"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://bhsciencesociety.vercel.app"],
+      imgSrc: ["'self'", "data:", "https://cdn.glitch.global", "https:", "https://bhsciencesociety.vercel.app"],
+      connectSrc: ["'self'", "https://bhss-backend.up.railway.app", "https://ipapi.co", "https://ipwhois.app", "https://bhsciencesociety.vercel.app"],
+      frameAncestors: ["'self'", "https://bhsciencesociety.vercel.app"],
+      formAction: ["'self'", "https://bhsciencesociety.vercel.app"]
+    }
+  },
+  crossOriginEmbedderPolicy: false,
+  crossOriginResourcePolicy: { policy: "cross-origin" }
+}));
 
+// Add specific CORS for your frontend
+app.use(cors({
+  origin: [
+    'https://bhsciencesociety.vercel.app', 
+    'http://localhost:3000',
+    'https://bhsciencesociety.vercel.app'
+  ],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
+}));
 // Helper functions
 function authenticateUser(req, res, next) {
   try {

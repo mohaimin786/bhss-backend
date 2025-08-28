@@ -374,9 +374,20 @@ async function copySubmissionToDashboard(submissionData) {
       status: submissionData.status,
       notes: submissionData.notes,
       timestamp: submissionData.timestamp,
-      lastUpdated: new Date()
+      lastUpdated: new Date(),
+      // Add the new fields with default values
+      bio: '',
+      linkedin: '',
+      github: '',
+      twitter: '',
+      instagram: '',
+      website: '',
+      avatar: '',
+      dashboardNotes: '',
+      priority: 'medium'
     };
 
+    
     await DashboardInfo.findOneAndUpdate(
       { _id: submissionData._id },
       dashboardData,
@@ -388,7 +399,6 @@ async function copySubmissionToDashboard(submissionData) {
     console.error('Error copying submission to dashboard:', err);
   }
 }
-
 // Routes
 
 // User login route with remember me functionality
@@ -1362,26 +1372,26 @@ app.put('/api/user/profile', authenticateUser, async (req, res) => {
     if (fullName) user.fullName = fullName;
     await user.save();
 
-    // Update or create dashboard info
+    // Update or create dashboard info with ALL fields
     const dashboardData = {
       fullName: fullName || user.fullName,
       email: user.email,
-      phone: phone || null,
-      dob: dob || null,
-      grade: grade || null,
-      school: school || null,
-      city: city || null,
-      country: country || null,
-      bio: bio || null,
-      linkedin: linkedin || null,
-      github: github || null,
-      twitter: twitter || null,
-      instagram: instagram || null,
-      website: website || null,
+      phone: phone || '',
+      dob: dob || '',
+      grade: grade || '',
+      school: school || '',
+      city: city || '',
+      country: country || '',
+      bio: bio || '',
+      linkedin: linkedin || '',
+      github: github || '',
+      twitter: twitter || '',
+      instagram: instagram || '',
+      website: website || '',
       lastUpdated: new Date()
     };
 
-    await DashboardInfo.findOneAndUpdate(
+    const updatedDashboard = await DashboardInfo.findOneAndUpdate(
       { email: user.email },
       dashboardData,
       { upsert: true, new: true }
@@ -1393,18 +1403,19 @@ app.put('/api/user/profile', authenticateUser, async (req, res) => {
       profile: {
         email: user.email,
         fullName: user.fullName,
-        phone,
-        dob,
-        grade,
-        school,
-        city,
-        country,
-        bio,
-        linkedin,
-        github,
-        twitter,
-        instagram,
-        website
+        phone: updatedDashboard.phone,
+        dob: updatedDashboard.dob,
+        grade: updatedDashboard.grade,
+        school: updatedDashboard.school,
+        city: updatedDashboard.city,
+        country: updatedDashboard.country,
+        bio: updatedDashboard.bio,
+        linkedin: updatedDashboard.linkedin,
+        github: updatedDashboard.github,
+        twitter: updatedDashboard.twitter,
+        instagram: updatedDashboard.instagram,
+        website: updatedDashboard.website,
+        avatar: updatedDashboard.avatar
       }
     });
   } catch (err) {
@@ -1417,17 +1428,12 @@ app.put('/api/user/profile', authenticateUser, async (req, res) => {
 });
 
 // Upload avatar endpoint
-app.post('/api/user/avatar', authenticateUser, async (req, res) => {
+app.post('/api/user/avatar', authenticateUser, upload.single('avatar'), async (req, res) => {
   try {
-    // In a real implementation, you would handle file upload here
-    // For this example, we'll simulate processing and return a success response
-    
-    const { avatarData } = req.body;
-    
-    if (!avatarData) {
+    if (!req.file) {
       return res.status(400).json({ 
         success: false, 
-        message: 'Avatar data is required' 
+        message: 'No file uploaded' 
       });
     }
 
@@ -1439,6 +1445,10 @@ app.post('/api/user/avatar', authenticateUser, async (req, res) => {
         message: 'User not found' 
       });
     }
+
+    // Convert image to base64 for storage
+    const base64Image = req.file.buffer.toString('base64');
+    const avatarData = `data:${req.file.mimetype};base64,${base64Image}`;
 
     // Update avatar in dashboard info
     await DashboardInfo.findOneAndUpdate(
@@ -1452,7 +1462,7 @@ app.post('/api/user/avatar', authenticateUser, async (req, res) => {
 
     res.json({ 
       success: true, 
-      message: 'Avatar updated successfully',
+      message: 'Avatar uploaded successfully',
       avatar: avatarData
     });
   } catch (err) {
@@ -1463,6 +1473,7 @@ app.post('/api/user/avatar', authenticateUser, async (req, res) => {
     });
   }
 });
+
 
 // Change password endpoint
 app.post('/api/user/change-password', authenticateUser, async (req, res) => {
@@ -1820,12 +1831,26 @@ app.get('/api/user/dashboard-info', authenticateUser, async (req, res) => {
       });
     }
 
+    // Find dashboard info by email
     const dashboardInfo = await DashboardInfo.findOne({ email: user.email });
     
     if (!dashboardInfo) {
-      return res.status(404).json({ 
-        success: false, 
-        message: 'Dashboard info not found' 
+      // If no dashboard info exists, create it from user data
+      const newDashboardInfo = new DashboardInfo({
+        _id: new mongoose.Types.ObjectId().toString(),
+        fullName: user.fullName,
+        email: user.email,
+        // Set default values for other fields
+        status: 'approved',
+        timestamp: new Date(),
+        lastUpdated: new Date()
+      });
+      
+      await newDashboardInfo.save();
+      
+      return res.json({ 
+        success: true, 
+        data: newDashboardInfo 
       });
     }
 

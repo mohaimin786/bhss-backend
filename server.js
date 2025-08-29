@@ -353,7 +353,7 @@ async function copySubmissionToDashboard(submissionData) {
       email: submissionData.email,
       countryCode: submissionData.countryCode,
       phone: submissionData.phone,
-      dob: submissionData.dob,
+      dob: submissionData.dob || '',
       grade: submissionData.grade,
       isBhStudent: submissionData.isBhStudent,
       bhBranch: submissionData.bhBranch,
